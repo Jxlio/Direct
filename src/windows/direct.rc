@@ -1,0 +1,28 @@
+#include <windows.h>
+1 ICON "assets/direct.ico"
+#include "assets/lucide/icons.rc.inc"
+2 RCDATA "direct-notices.txt"
+3 RCDATA "CHANGELOG.md"
+1 VERSIONINFO
+FILEVERSION 0,6,0,0
+PRODUCTVERSION 0,6,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040C04B0"
+    BEGIN
+      VALUE "FileDescription", "Direct - Messages et appels\0"
+      VALUE "FileVersion", "0.6.0\0"
+      VALUE "InternalName", "Direct\0"
+      VALUE "OriginalFilename", "Direct.exe\0"
+      VALUE "ProductName", "Direct\0"
+      VALUE "ProductVersion", "0.6.0\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x040C, 1200
+  END
+END

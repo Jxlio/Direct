@@ -1,0 +1,11 @@
+/build/
+/out/
+*.user
+/vendor/
+.env
+.env.*
+relay.env
+*.pem
+*.key
+*.pfx
+/src/windows/assets/lucide/generated/*.png

@@ -1,0 +1,9 @@
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.svg text eol=lf
+*.ico binary
+include/third_party/* -whitespace
