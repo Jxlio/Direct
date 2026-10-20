@@ -61,4 +61,4 @@ restent a copier entre proches. Il ne fournit pas de TURN sur TCP/TLS.
 Le binaire Windows compile et la validation de configuration sont testes ; le
 backend serveur est aussi utilise par les tests de relais sur loopback. Le
 deploiement Internet et la compilation Linux/macOS de cet executable restent
-a verifier. Conserver le dossier licenses/ et THIRD_PARTY.md avec les binaires.
+a verifier. Conserver le dossier licenses/ et third-party.md avec les binaires.

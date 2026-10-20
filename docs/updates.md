@@ -14,7 +14,7 @@
 - Une mise à jour authentifiée est appliquée à la fermeture normale, sans fermer
   une conversation à la place de l'utilisateur. Direct ne redémarre pas seul.
 - Avant 0.6, une installation manuelle du nouveau ZIP est nécessaire une fois.
-- Aucune release n'est encore publiée au moment de l'ajout de cette fonctionnalité.
+- Les versions publiques sont disponibles sur [GitHub Releases](https://github.com/Jxlio/Direct/releases).
 
 ## Fichiers de release
 
@@ -61,12 +61,11 @@ Les téléchargements HTTP sont bornés et temporisés, mais la résolution DNS 
 les proxys système peuvent encore ajouter une latence. L'interface n'attend pas
 le worker réseau à la fermeture ; un téléchargement inachevé n'est pas installé.
 
-## Publication préparée
+## Publication
 
 Le workflow `.github/workflows/release.yml` compile et teste sur Windows x64,
 prépare le ZIP, signe les assets et crée une **release en brouillon** sur un tag.
 Le lancement manuel du workflow produit seulement le ZIP de test.
-Le tag, le code et le workflow restent à envoyer au dépôt avant utilisation.
 La publication finale du brouillon rend la version visible aux applications.
 
 La clé privée a été créée localement dans le dossier `DirectPublisher` de
@@ -99,5 +98,5 @@ clés de test/publication. Test entre processus : attente de fermeture, remplace
 correct, sauvegarde exacte de l'ancien fichier et refus d'un payload modifié sans
 modifier le programme initial. Ces tests utilisent uniquement des fichiers
 temporaires et une clé de test distincte ; aucun serveur public ni profil n'est
-nécessaire. Le téléchargement/installation d'une release réellement publiée et
-le workflow GitHub restent à valider après publication initiale.
+nécessaire. L’installation automatique depuis une release publique reste à valider. Le workflow
+GitHub et la signature des fichiers publiés ont été vérifiés pour la version 0.6.0.

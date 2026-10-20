@@ -135,7 +135,7 @@ if(WIN32)
   target_sources(murmur PRIVATE src/windows/updates.c)
   configure_file(src/windows/direct_version.h.in "${CMAKE_CURRENT_BINARY_DIR}/direct_version.h" @ONLY)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/direct-notices.txt" "Direct - third-party licenses\n\n")
-  foreach(NOTICE "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY.md" "${MURMUR_TLS_SOURCE}/LICENSE" "${MURMUR_TLS_SOURCE}/3rdparty/everest/README.md" "${MURMUR_TLS_SOURCE}/3rdparty/p256-m/README.md" "${MURMUR_OPUS_SOURCE}/COPYING" "${MURMUR_MINIAUDIO_SOURCE}/LICENSE" "${MURMUR_JUICE_SOURCE}/LICENSE" "${MURMUR_KCP_SOURCE}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/src/windows/assets/lucide/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/include/third_party/JSMN-LICENSE.txt")
+  foreach(NOTICE "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party.md" "${MURMUR_TLS_SOURCE}/LICENSE" "${MURMUR_TLS_SOURCE}/3rdparty/everest/README.md" "${MURMUR_TLS_SOURCE}/3rdparty/p256-m/README.md" "${MURMUR_OPUS_SOURCE}/COPYING" "${MURMUR_MINIAUDIO_SOURCE}/LICENSE" "${MURMUR_JUICE_SOURCE}/LICENSE" "${MURMUR_KCP_SOURCE}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/src/windows/assets/lucide/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/include/third_party/JSMN-LICENSE.txt")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${NOTICE}")
     file(READ "${NOTICE}" NOTICE_TEXT)
     file(APPEND "${CMAKE_CURRENT_BINARY_DIR}/direct-notices.txt" "\n\n${NOTICE_TEXT}")
@@ -161,13 +161,13 @@ add_custom_command(TARGET murmur POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${MURMUR_TLS_SOURCE}/3rdparty/p256-m/README.md" "$<TARGET_FILE_DIR:murmur>/licenses/p256-m-NOTICE.md"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY.md" "$<TARGET_FILE_DIR:murmur>/licenses/THIRD_PARTY.md")
+    "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party.md" "$<TARGET_FILE_DIR:murmur>/licenses/THIRD_PARTY.md")
 add_custom_command(TARGET murmur POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/windows/assets/lucide/LICENSE" "$<TARGET_FILE_DIR:murmur>/licenses/Lucide-LICENSE.txt"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_OPUS_SOURCE}/COPYING" "$<TARGET_FILE_DIR:murmur>/licenses/Opus-LICENSE.txt"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_MINIAUDIO_SOURCE}/LICENSE" "$<TARGET_FILE_DIR:murmur>/licenses/miniaudio-LICENSE.txt")
 foreach(MURMUR_BINARY murmur murmur-relay)
-  set_property(TARGET ${MURMUR_BINARY} APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY.md")
+  set_property(TARGET ${MURMUR_BINARY} APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party.md")
   add_custom_command(TARGET ${MURMUR_BINARY} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_JUICE_SOURCE}/LICENSE" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/libjuice-LICENSE.txt"
@@ -175,7 +175,7 @@ foreach(MURMUR_BINARY murmur murmur-relay)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_TLS_SOURCE}/LICENSE" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/MbedTLS-LICENSE.txt"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_TLS_SOURCE}/3rdparty/everest/README.md" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/Everest-NOTICE.md"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MURMUR_TLS_SOURCE}/3rdparty/p256-m/README.md" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/p256-m-NOTICE.md"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY.md" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/THIRD_PARTY.md")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party.md" "$<TARGET_FILE_DIR:${MURMUR_BINARY}>/licenses/THIRD_PARTY.md")
 endforeach()
 include(CTest)
 if(BUILD_TESTING)

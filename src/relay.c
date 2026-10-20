@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc != 1 && !check) {
-        puts("murmur-relay [--check | --new-secret]\nConfiguration: voir RELAY.md. Aucun service n'est installe automatiquement.");
+        puts("murmur-relay [--check | --new-secret]\nConfiguration: voir docs/relay.md. Aucun service n'est installe automatiquement.");
         return 1;
     }
     if (setting(bind, sizeof(bind), "MURMUR_RELAY_BIND", "127.0.0.1") ||
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
         !*username || strlen(password) < 32 || config.relay_port_range_begin > config.relay_port_range_end ||
         ((!strcmp(bind, "0.0.0.0") || !strcmp(bind, "::")) && !*external)) {
         fputs("Configuration invalide : identifiant requis, secret >=32 caracteres, ports valides,\n"
-            "et adresse externe requise avec une ecoute sur toutes les interfaces. Voir RELAY.md.\n", stderr);
+            "et adresse externe requise avec une ecoute sur toutes les interfaces. Voir docs/relay.md.\n", stderr);
         return 1;
     }
     credentials.username = username; credentials.password = password; credentials.allocations_quota = 8;

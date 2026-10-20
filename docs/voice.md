@@ -4,7 +4,7 @@ Les reglages audio et les limites de test ci-dessous restent valables. Depuis
 la version 0.4, le parcours ICE transporte le texte fiable et l'audio dans la
 meme association DTLS ; seul le texte passe par KCP. Il utilise un seul chemin
 ICE choisi automatiquement, direct ou relaye. Le port UDP +1 et les details
-TLS/TCP de cette page s'appliquent uniquement au mode IP manuelle. Voir ICE.md.
+TLS/TCP de cette page s'appliquent uniquement au mode IP manuelle. Voir connectivity.md.
 
 ## Utilisation
 

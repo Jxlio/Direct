@@ -2,7 +2,7 @@
 
 Depuis la version 0.4, le bouton Connexion privee ouvre le nouveau parcours ICE.
 Ce document decrit uniquement le bouton IP manuelle de ce panneau. Le nouveau
-mode est documente dans ICE.md ; il n'a pas besoin des deux ports fixes ci-dessous.
+mode est documente dans connectivity.md ; il n'a pas besoin des deux ports fixes ci-dessous.
 
 ## Essayer sous Windows
 
@@ -18,7 +18,7 @@ mode est documente dans ICE.md ; il n'a pas besoin des deux ports fixes ci-desso
 7. Pour le vocal, chaque personne clique sur **Rejoindre le vocal**. Le micro
    ne s'ouvre qu'apres les deux activations et l'authentification du canal audio.
    **Muet** coupe l'envoi du micro ; **Quitter le vocal** libere les peripheriques.
-   Voir VOICE.md pour les limites et les ports.
+   Voir VOconnectivity.md pour les limites et les ports.
 
 Sur Internet, l'hote doit deja disposer d'un port TCP accessible. Il n'y a ni
 STUN/TURN, ni ouverture automatique de port, ni serveur de rendez-vous dans cette
@@ -79,7 +79,7 @@ valider. Ne pas presenter le test loopback comme un test Internet.
 Pas de confirmation de remise : « envoi demande » signifie mise en file locale.
 Les messages en attente peuvent etre perdus a la deconnexion. Pas de stockage
 hors ligne, de retransmission applicative, de reconnexion automatique ni de groupe.
-Le vocal est limite a deux avec peripheriques par defaut ; voir VOICE.md.
+Le vocal est limite a deux avec peripheriques par defaut ; voir VOconnectivity.md.
 Pas encore de partage d'ecran. L'interface des autres plateformes reste
 a construire. Le coeur reseau est en C portable, sans validation de compilation
 sur Linux/macOS pour l'instant. Le binaire non Windows reste la demonstration

@@ -1,7 +1,7 @@
 # Connexion ICE (0.4)
 
 Depuis 0.5, ce panneau est accessible via **Mes amis > Connexion avancee**.
-Le nouveau parcours local sans codes de session est decrit dans [FRIENDS.md](FRIENDS.md).
+Le nouveau parcours local sans codes de session est decrit dans [friends.md](friends.md).
 
 ## Retrouver un proche
 
@@ -38,7 +38,7 @@ STUN ne garantit pas une connexion sur tous les types de box/NAT. Si un relais
 TURN est disponible, renseigner son hote, son port UDP, son identifiant et son mot
 de passe dans les deux applications avant de creer/repondre. ICE choisit un
 chemin et peut utiliser les candidats du relais. Aucun relais public Murmur n'est
-deploye et aucune cle de service payant n'est embarquee. Voir RELAY.md pour le
+deploye et aucune cle de service payant n'est embarquee. Voir relay.md pour le
 binaire de serveur fourni. Les reseaux bloquant l'UDP restent incompatibles :
 ce mode n'implemente pas de TURN sur TCP/TLS 443.
 
