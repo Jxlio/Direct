@@ -1,5 +1,14 @@
 # Direct — historique des versions
 
+## 0.6.1 — 21 octobre 2026
+
+- Navigation séparée entre amis et conversations, avec avatar et présence du correspondant.
+- Bulles distinctes pour les messages envoyés et reçus, noms d’auteur et heures.
+- Paramètres audio : choix du micro et de la sortie, volumes indépendants enregistrés localement.
+- Tests du micro avec indicateur de niveau et son de test sur la sortie sélectionnée.
+- Appel entrant, réponse, attente et état des micros visibles ; raccrochage des deux côtés.
+- Test solo accessible depuis les paramètres : deux clients connectés automatiquement, messages chiffrés et audio simulé sans modifier les contacts personnels.
+
 ## 0.6.0 — 21 octobre 2026
 
 - Panneau Versions et mises à jour dans l'application Windows.

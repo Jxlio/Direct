@@ -10,7 +10,10 @@ static struct {
     HANDLE thread, stop, wake;
     CRITICAL_SECTION lock;
     int state, error, server;
+    int test_audio;
     int voice_requested, voice_muted, voice_state;
+    unsigned remote_voice;
+    murmur_audio_config audio;
     unsigned voice_packets;
     uint64_t voice_decoded;
     int ice_mode, ice_phase, ice_relayed, answer_pending, signal_problem;
@@ -29,6 +32,27 @@ static void voice_status(int state) {
     LeaveCriticalSection(&transport.lock);
     if (changed) PostMessageW(transport.window, WM_MURMUR_LINK, 0, 0);
 }
+static void remote_status(unsigned value) {
+    int changed;
+    EnterCriticalSection(&transport.lock);
+    changed=transport.remote_voice!=value;
+    /* Once a live peer leaves, end our participation too; no unexpected reopening. */
+    if((transport.remote_voice&1) && !(value&1) && transport.voice_requested)
+        transport.voice_requested=transport.voice_muted=0;
+    transport.remote_voice=value;
+    LeaveCriticalSection(&transport.lock);
+    if(changed) PostMessageW(transport.window,WM_MURMUR_LINK,0,0);
+}
+static murmur_voice *configured_voice(int hardware) {
+    murmur_audio_config config;
+    EnterCriticalSection(&transport.lock); config=transport.audio; LeaveCriticalSection(&transport.lock);
+    return murmur_voice_create_config(hardware,&config);
+}
+static void apply_volume(murmur_voice *voice) {
+    EnterCriticalSection(&transport.lock);
+    murmur_voice_volume(voice,transport.audio.input_volume,transport.audio.output_volume);
+    LeaveCriticalSection(&transport.lock);
+}
 static void voice_failed(void) {
     EnterCriticalSection(&transport.lock);
     transport.voice_requested = transport.voice_muted = 0;
@@ -43,12 +67,21 @@ static void update(int state, int error) {
     PostMessageW(transport.window, WM_MURMUR_LINK, 0, 0);
 }
 static void ice_wakeup(void *user) { SetEvent((HANDLE)user); }
+static void simulated_audio(murmur_voice *voice,ULONGLONG *last) {
+    int16_t input[MURMUR_VOICE_SAMPLES],output[MURMUR_VOICE_SAMPLES]; unsigned i; ULONGLONG now=GetTickCount64();
+    if (!transport.test_audio || now-*last<20) return;
+    *last=now;
+    for (i=0;i<MURMUR_VOICE_SAMPLES;++i) input[i]=(i%64)<32?2000:-2000;
+    murmur_voice_capture(voice,input,MURMUR_VOICE_SAMPLES);
+    murmur_voice_playback(voice,output,MURMUR_VOICE_SAMPLES);
+}
 static DWORD WINAPI run_ice(void *unused) {
     murmur_ice *peer;
     murmur_voice *voice = NULL;
     unsigned remote_voice = 0, sent_voice = 0;
     int exported = 0, connected = 0;
     DWORD wait = 0;
+    ULONGLONG simulated_at=0;
     HANDLE events[2] = {transport.stop, transport.wake};
     (void)unused;
     transport.ice_settings.wakeup = ice_wakeup;
@@ -110,7 +143,7 @@ static DWORD WINAPI run_ice(void *unused) {
         }
         EnterCriticalSection(&transport.lock); got = transport.in_count < QUEUE_SIZE; LeaveCriticalSection(&transport.lock);
         if (got && murmur_ice_receive(peer, &kind, &message.room, message.text, sizeof(message.text), &message.size) == 1) {
-            if (kind == MURMUR_CONTROL) remote_voice = message.text[0];
+            if (kind == MURMUR_CONTROL) { remote_voice = message.text[0]; remote_status(remote_voice); }
             else {
                 EnterCriticalSection(&transport.lock);
                 transport.in[(transport.in_head + transport.in_count) % QUEUE_SIZE] = message;
@@ -129,11 +162,13 @@ static DWORD WINAPI run_ice(void *unused) {
 #ifdef MURMUR_HEADLESS_AUDIO_TEST
                 voice = murmur_voice_create(0);
 #else
-                voice = murmur_voice_create(1);
+                voice = configured_voice(!transport.test_audio);
 #endif
                 if (!voice) { voice_failed(); continue; }
             }
+            apply_volume(voice);
             murmur_voice_mute(voice, (local_voice & 2) != 0);
+            simulated_audio(voice,&simulated_at);
             voice_status(local_voice & 2 ? 4 : 3);
             encoded = murmur_voice_encode(voice, packet);
             if (encoded > 0) murmur_ice_send_audio(peer, packet, (size_t)encoded);
@@ -167,6 +202,7 @@ static DWORD WINAPI run_ice(void *unused) {
     SecureZeroMemory(transport.ice_answer, sizeof(transport.ice_answer)); transport.answer_pending = 0;
     SecureZeroMemory(transport.ice_settings.password, sizeof(transport.ice_settings.password));
     LeaveCriticalSection(&transport.lock);
+    remote_status(0);
     voice_status(0);
     if (WaitForSingleObject(transport.stop, 0) == WAIT_OBJECT_0) update(0, 0);
     PostMessageW(transport.window, WM_MURMUR_LINK, 0, 0);
@@ -226,7 +262,7 @@ static DWORD WINAPI run(void *unused) {
         LeaveCriticalSection(&transport.lock);
         if (got) {
             got = murmur_peer_receive_packet(peer, &kind, &message.room, message.text, sizeof(message.text), &message.size);
-            if (got == 1 && kind == MURMUR_CONTROL) remote_voice = message.text[0];
+            if (got == 1 && kind == MURMUR_CONTROL) { remote_voice = message.text[0]; remote_status(remote_voice); }
             else if (got == 1 && kind == MURMUR_TEXT) {
                 EnterCriticalSection(&transport.lock);
                 transport.in[(transport.in_head + transport.in_count) % QUEUE_SIZE] = message;
@@ -276,10 +312,11 @@ static DWORD WINAPI run(void *unused) {
                 }
 #else
                 /* Hardware is opened only after both opt-ins and DTLS authentication. */
-                voice = murmur_voice_create(1);
+                voice = configured_voice(1);
 #endif
                 if (!voice) { murmur_peer_free(media); media = NULL; voice_failed(); continue; }
             }
+            apply_volume(voice);
             murmur_voice_mute(voice, (local_voice & 2) != 0);
             voice_status(local_voice & 2 ? 4 : 3);
             encoded = murmur_voice_encode(voice, packet);
@@ -309,6 +346,7 @@ static DWORD WINAPI run(void *unused) {
     EnterCriticalSection(&transport.lock);
     transport.voice_requested = transport.voice_muted = 0;
     LeaveCriticalSection(&transport.lock);
+    remote_status(0);
     voice_status(0);
     if (WaitForSingleObject(transport.stop, 0) == WAIT_OBJECT_0) update(0, 0);
     return 0;
@@ -316,9 +354,14 @@ static DWORD WINAPI run(void *unused) {
 void link_init(HWND window) {
     juice_set_log_level(JUICE_LOG_LEVEL_NONE);
     transport.window = window;
+    murmur_audio_defaults(&transport.audio);
     InitializeCriticalSection(&transport.lock);
     transport.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     transport.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+}
+int link_set_test_audio(int enabled) {
+    if (link_busy()) return -1;
+    transport.test_audio=!!enabled; return 0;
 }
 int link_busy(void) {
     return transport.thread && WaitForSingleObject(transport.thread, 0) == WAIT_TIMEOUT;
@@ -337,6 +380,7 @@ int link_start(int server, const char *host, const char *port, const uint8_t key
     SecureZeroMemory(transport.in, sizeof(transport.in));
     transport.out_head = transport.out_count = transport.in_head = transport.in_count = 0;
     transport.state = 1; transport.error = 0;
+    transport.remote_voice=0;
     transport.voice_requested = transport.voice_muted = transport.voice_state = 0;
     transport.voice_packets = 0;
     transport.voice_decoded = 0;
@@ -436,6 +480,7 @@ int link_ice_start(int offerer, const murmur_ice_config *settings, const char *o
     if (!offerer) strcpy_s(transport.ice_input, sizeof(transport.ice_input), offer);
     EnterCriticalSection(&transport.lock);
     transport.state = 1; transport.error = 0; transport.ice_phase = transport.ice_relayed = transport.signal_problem = 0;
+    transport.remote_voice=0;
     transport.voice_requested = transport.voice_muted = transport.voice_state = 0;
     transport.voice_packets = 0; transport.voice_decoded = 0;
     transport.in_head = transport.in_count = transport.out_head = transport.out_count = 0;
@@ -478,4 +523,15 @@ int link_ice_phase(void) {
 int link_ice_relayed(void) {
     int result;
     EnterCriticalSection(&transport.lock); result = transport.ice_relayed; LeaveCriticalSection(&transport.lock); return result;
+}
+
+unsigned link_voice_remote(void) {
+    unsigned value; EnterCriticalSection(&transport.lock); value=transport.remote_voice; LeaveCriticalSection(&transport.lock); return value;
+}
+void link_audio_configure(const murmur_audio_config *config) {
+    if(!config) return;
+    EnterCriticalSection(&transport.lock); transport.audio=*config;
+    if(transport.audio.input_volume>100) transport.audio.input_volume=100;
+    if(transport.audio.output_volume>100) transport.audio.output_volume=100;
+    LeaveCriticalSection(&transport.lock); SetEvent(transport.wake);
 }

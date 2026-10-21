@@ -7,6 +7,8 @@ typedef struct { DWORD version, count; saved_friend items[16]; } friend_book;
 int friend_book_load(const WCHAR *path, friend_book *book);
 int friend_book_save(const WCHAR *path, const friend_book *book);
 void friends_init(HWND parent);
+void friends_init_test(HWND parent,const WCHAR *peer);
+void friends_connection_refresh(void);
 void friends_show(HWND parent);
 int friends_translate(MSG *message);
 void friends_close(void);

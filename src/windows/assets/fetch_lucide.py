@@ -3,7 +3,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 revision = "c29c276f16590cf017126671535ad8c792be64d8"
-names = ["message-circle", "users", "phone", "phone-off", "mic", "mic-off", "send", "monitor", "calendar-days", "gamepad-2"]
+names = ["message-circle", "users", "phone", "phone-off", "mic", "mic-off", "send", "monitor", "calendar-days", "gamepad-2", "settings"]
 target = Path(__file__).with_name("lucide")
 target.mkdir(exist_ok=True)
 base = f"https://raw.githubusercontent.com/lucide-icons/lucide/{revision}/"

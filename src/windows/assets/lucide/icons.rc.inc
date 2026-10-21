@@ -39,3 +39,7 @@
 137 ICON "assets/lucide/generated/9-1.ico"
 138 ICON "assets/lucide/generated/9-2.ico"
 139 ICON "assets/lucide/generated/9-3.ico"
+140 ICON "assets/lucide/generated/10-0.ico"
+141 ICON "assets/lucide/generated/10-1.ico"
+142 ICON "assets/lucide/generated/10-2.ico"
+143 ICON "assets/lucide/generated/10-3.ico"

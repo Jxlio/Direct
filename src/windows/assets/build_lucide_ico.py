@@ -4,7 +4,7 @@ from PIL import Image
 
 root = Path(__file__).with_name("lucide")
 lines = ["// Generated from the pinned Lucide SVG files; see LICENSE and REVISION.txt."]
-for i in range(10):
+for i in range(11):
     for color in range(4):
         source = root / "generated" / f"{i}-{color}.png"
         image = Image.open(source).convert("RGBA")

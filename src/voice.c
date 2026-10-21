@@ -26,7 +26,7 @@ struct murmur_voice {
     OpusEncoder *encoder;
     OpusDecoder *decoder;
     int device_ready, capture_ready, playback_ready, playing;
-    ma_uint32 muted;
+    ma_uint32 muted, input_volume, output_volume;
     uint32_t sequence, expected, last_played, last_real, history, highest;
     int initialized, scheduled, started, have_played, have_real, have_highest, missing;
     uint64_t deadline;
@@ -61,7 +61,14 @@ static size_t read_ring(ma_pcm_rb *ring, int16_t *samples, size_t count) {
 void murmur_voice_capture(murmur_voice *v, const int16_t *samples, size_t count) {
     if (!v || !samples || ma_atomic_load_32(&v->muted)) return;
     /* Overflow drops incoming samples. The consumer skips stale queued capture. */
-    write_ring(&v->capture, samples, count);
+    {
+        int16_t adjusted[256]; size_t offset=0; unsigned gain=ma_atomic_load_32(&v->input_volume);
+        while (offset<count) {
+            size_t i,n=count-offset; if(n>256) n=256;
+            for(i=0;i<n;++i) adjusted[i]=(int16_t)((int)samples[offset+i]*(int)gain/100);
+            write_ring(&v->capture,adjusted,n); offset+=n;
+        }
+    }
 }
 void murmur_voice_playback(murmur_voice *v, int16_t *samples, size_t count) {
     size_t done;
@@ -72,6 +79,8 @@ void murmur_voice_playback(murmur_voice *v, int16_t *samples, size_t count) {
     if (!v->playing) return;
     done = read_ring(&v->playback, samples, count);
     if (done < count) v->playing = 0;
+    { size_t i; unsigned gain=ma_atomic_load_32(&v->output_volume);
+      for(i=0;i<done;++i) samples[i]=(int16_t)((int)samples[i]*(int)gain/100); }
 }
 static void callback(ma_device *device, void *output, const void *input, ma_uint32 count) {
     murmur_voice *v = device->pUserData;
@@ -90,10 +99,11 @@ void murmur_voice_free(murmur_voice *v) {
       for (i = 0; i < sizeof(*v); ++i) p[i] = 0; }
     free(v);
 }
-murmur_voice *murmur_voice_create(int hardware) {
+murmur_voice *murmur_voice_create_config(int hardware, const murmur_audio_config *settings) {
     murmur_voice *v = calloc(1, sizeof(*v));
     int error;
     if (!v) return NULL;
+    murmur_voice_volume(v, settings ? settings->input_volume : 100, settings ? settings->output_volume : 100);
     v->encoder = opus_encoder_create(MURMUR_VOICE_RATE, 1, OPUS_APPLICATION_VOIP, &error);
     if (!v->encoder || error != OPUS_OK) goto fail;
     v->decoder = opus_decoder_create(MURMUR_VOICE_RATE, 1, &error);
@@ -107,7 +117,18 @@ murmur_voice *murmur_voice_create(int hardware) {
     if (ma_pcm_rb_init(ma_format_s16, 1, RING_SAMPLES, v->playback_memory, NULL, &v->playback)) goto fail;
     v->playback_ready = 1;
     if (hardware) {
+        ma_device_id input_id, output_id;
         ma_device_config config = ma_device_config_init(ma_device_type_duplex);
+        if (settings && settings->input_selected) { memcpy(&input_id,settings->input_id,sizeof(input_id));
+#ifdef _WIN32
+            input_id.wasapi[63]=0;
+#endif
+            config.capture.pDeviceID=&input_id; }
+        if (settings && settings->output_selected) { memcpy(&output_id,settings->output_id,sizeof(output_id));
+#ifdef _WIN32
+            output_id.wasapi[63]=0;
+#endif
+            config.playback.pDeviceID=&output_id; }
         config.capture.format = config.playback.format = ma_format_s16;
         config.capture.channels = config.playback.channels = 1;
         config.sampleRate = MURMUR_VOICE_RATE;
@@ -274,4 +295,65 @@ void murmur_voice_pump(murmur_voice *v, uint64_t now_ms) {
 }
 void murmur_voice_get_stats(const murmur_voice *v, murmur_voice_stats *stats) {
     if (v && stats) *stats = v->stats;
+}
+
+void murmur_audio_defaults(murmur_audio_config *config) {
+    if (!config) return;
+    memset(config,0,sizeof(*config)); config->input_volume=config->output_volume=100;
+}
+murmur_voice *murmur_voice_create(int hardware) { return murmur_voice_create_config(hardware,NULL); }
+void murmur_voice_volume(murmur_voice *v,unsigned input,unsigned output) {
+    if(!v) return;
+    ma_atomic_store_32(&v->input_volume,input>100?100:input);
+    ma_atomic_store_32(&v->output_volume,output>100?100:output);
+}
+int murmur_audio_devices(int capture,murmur_audio_device *devices,unsigned capacity) {
+    ma_context context; ma_device_info *inputs,*outputs,*list; ma_uint32 in_count,out_count,n,i;
+    _Static_assert(sizeof(ma_device_id)<=256,"audio device ID capacity");
+    if(!devices || ma_context_init(NULL,0,NULL,&context)!=MA_SUCCESS) return -1;
+    if(ma_context_get_devices(&context,&outputs,&out_count,&inputs,&in_count)!=MA_SUCCESS) { ma_context_uninit(&context); return -1; }
+    list=capture?inputs:outputs; n=capture?in_count:out_count; if(n>capacity) n=capacity;
+    for(i=0;i<n;++i) { memset(&devices[i],0,sizeof(devices[i])); memcpy(devices[i].id,&list[i].id,sizeof(list[i].id)); memcpy(devices[i].name,list[i].name,sizeof(devices[i].name)-1); }
+    ma_context_uninit(&context); return (int)n;
+}
+struct murmur_audio_preview { ma_device device; ma_uint32 level,volume; unsigned phase; int capture; };
+static void preview_callback(ma_device *device,void *output,const void *input,ma_uint32 count) {
+    murmur_audio_preview *p=device->pUserData; ma_uint32 i,peak=0,gain=ma_atomic_load_32(&p->volume);
+    if(input) {
+        const int16_t *pcm=input;
+        for(i=0;i<count;++i) { unsigned value=(unsigned)abs((int)pcm[i])*gain/100; if(value>peak) peak=value; }
+        ma_atomic_store_32(&p->level,peak*100/32768);
+    }
+    if(output) {
+        int16_t *pcm=output;
+        for(i=0;i<count;++i) { int value=(int)(p->phase%120); value=value<60?value:120-value; pcm[i]=(int16_t)((value-30)*100*(int)gain/100); ++p->phase; }
+    }
+}
+murmur_audio_preview *murmur_audio_preview_start(int capture,const murmur_audio_config *settings) {
+    murmur_audio_preview *p=calloc(1,sizeof(*p)); ma_device_id id;
+    ma_device_config config=ma_device_config_init(capture?ma_device_type_capture:ma_device_type_playback);
+    if(!p || !settings) { free(p); return NULL; }
+    p->capture=!!capture; p->volume=capture?settings->input_volume:settings->output_volume; if(p->volume>100) p->volume=100;
+    config.capture.format=config.playback.format=ma_format_s16;
+    config.capture.channels=config.playback.channels=1; config.sampleRate=MURMUR_VOICE_RATE;
+    config.dataCallback=preview_callback; config.pUserData=p;
+    if(capture && settings->input_selected) { memcpy(&id,settings->input_id,sizeof(id));
+#ifdef _WIN32
+        id.wasapi[63]=0;
+#endif
+        config.capture.pDeviceID=&id; }
+    if(!capture && settings->output_selected) { memcpy(&id,settings->output_id,sizeof(id));
+#ifdef _WIN32
+        id.wasapi[63]=0;
+#endif
+        config.playback.pDeviceID=&id; }
+    if(ma_device_init(NULL,&config,&p->device)!=MA_SUCCESS) { free(p); return NULL; }
+    if(ma_device_start(&p->device)!=MA_SUCCESS) { ma_device_uninit(&p->device); free(p); return NULL; }
+    return p;
+}
+void murmur_audio_preview_stop(murmur_audio_preview *p) { if(p) { ma_device_uninit(&p->device); free(p); } }
+unsigned murmur_audio_preview_level(murmur_audio_preview *p) { return p?ma_atomic_load_32(&p->level):0; }
+void murmur_audio_preview_volume(murmur_audio_preview *p,unsigned input,unsigned output) {
+    unsigned volume;
+    if(!p) return; volume=p->capture?input:output; ma_atomic_store_32(&p->volume,volume>100?100:volume);
 }

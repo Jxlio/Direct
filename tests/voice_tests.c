@@ -47,7 +47,30 @@ int main(void) {
     for (i = 0; i < 20; ++i) murmur_voice_capture(sender, input, MURMUR_VOICE_SAMPLES);
     CHECK(murmur_voice_encode(sender, packet) > 4);
     CHECK(murmur_voice_encode(sender, packet) == 0);
+    /* Playback gain is applied even to PCM already in the jitter buffer. */
+    murmur_voice_volume(receiver,100,0);
+    murmur_voice_playback(receiver,output,MURMUR_VOICE_SAMPLES);
+    for(i=0;i<MURMUR_VOICE_SAMPLES;++i) CHECK(output[i]==0);
     murmur_voice_free(sender); murmur_voice_free(receiver);
+    {
+        murmur_audio_config config;
+        murmur_audio_defaults(&config);
+        CHECK(config.input_volume==100 && config.output_volume==100 && !config.input_selected && !config.output_selected);
+        config.input_volume=0;
+        sender=murmur_voice_create_config(0,&config); receiver=murmur_voice_create(0);
+        CHECK(sender && receiver);
+        for(frame=0;frame<12;++frame) {
+            int control_size;
+            for(i=0;i<MURMUR_VOICE_SAMPLES;++i) input[i]=4000;
+            memset(output,0,sizeof(output));
+            murmur_voice_capture(sender,input,MURMUR_VOICE_SAMPLES);
+            murmur_voice_capture(receiver,output,MURMUR_VOICE_SAMPLES);
+            size=murmur_voice_encode(sender,packet);
+            control_size=murmur_voice_encode(receiver,last);
+            CHECK(size>4 && size==control_size && !memcmp(packet,last,(size_t)size));
+        }
+        murmur_voice_free(sender); murmur_voice_free(receiver);
+    }
     puts("Opus roundtrip, PLC, replay ordering, mute and bounded buffers passed; no devices opened.");
     return 0;
 }

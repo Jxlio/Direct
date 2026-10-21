@@ -18,6 +18,7 @@ static UINT panel_dpi = 96;
 static int scaled(int n) { return MulDiv(n, (int)panel_dpi, 96); }
 static SOCKET discovery = INVALID_SOCKET;
 static int selected = -1, enabled, responder_started, answer_received, winsock_ready;
+static int sandbox;
 static uint8_t session[32];
 static struct sockaddr_in destination;
 static ULONGLONG deadline;
@@ -29,9 +30,14 @@ static void refresh(void) {
     SendMessageW(list, LB_RESETCONTENT, 0, 0);
     for (i = 0; i < book.count; ++i) SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)book.items[i].name);
     if (selection != LB_ERR) SendMessageW(list, LB_SETCURSEL, (WPARAM)selection, 0);
-    EnableWindow(GetDlgItem(panel, 502), selection != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
+    EnableWindow(GetDlgItem(panel, 502), !sandbox && selection != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
     EnableWindow(GetDlgItem(panel, 509), selection != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
     SetWindowTextW(status, notice);
+    if (sandbox) {
+        SetWindowTextW(status,link_state()==2 ? L"Ami de test connecté. Messages réels chiffrés ; appel simulé, sans accès au microphone." : L"Connexion du second client local en cours. Aucun contact personnel n’est modifié.");
+        EnableWindow(GetDlgItem(panel,506),FALSE); EnableWindow(GetDlgItem(panel,507),FALSE);
+        EnableWindow(GetDlgItem(panel,508),FALSE); EnableWindow(GetDlgItem(panel,509),FALSE);
+    }
     ShowWindow(list, book.count ? SW_SHOWNA : SW_HIDE);
     InvalidateRect(panel, NULL, FALSE);
 }
@@ -219,7 +225,7 @@ static LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             old = SelectObject(item->hDC, font); SetBkMode(item->hDC, TRANSPARENT); SetTextColor(item->hDC, RGB(24, 34, 52));
             DrawTextW(item->hDC, book.items[item->itemID].name, -1, &r, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             r.top += scaled(24); SelectObject(item->hDC, small_font); SetTextColor(item->hDC, RGB(104, 116, 137));
-            DrawTextW(item->hDC, L"Ami enregistré", -1, &r, DT_SINGLELINE); SelectObject(item->hDC, old);
+            DrawTextW(item->hDC, sandbox ? (link_state()==2 ? L"En ligne · test local" : L"Connexion de test…") : L"Ami enregistré", -1, &r, DT_SINGLELINE); SelectObject(item->hDC, old);
         } else {
             panel_round(item->hDC, r, disabled ? RGB(242, 245, 250) : primary ? (chosen ? RGB(43, 83, 210) : RGB(58, 103, 244)) : chosen ? RGB(221, 230, 247) : RGB(242, 245, 250));
             GetWindowTextW(item->hwndItem, text, 96); old = SelectObject(item->hDC, font);
@@ -239,8 +245,8 @@ static LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                 SetWindowTextW(code_edit, wide);
                 SecureZeroMemory(code, sizeof(code)); SecureZeroMemory(wide, sizeof(wide));
             } else SetWindowTextW(code_edit, L"");
-            EnableWindow(GetDlgItem(window, 502), index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
-            EnableWindow(GetDlgItem(window, 509), index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
+            EnableWindow(GetDlgItem(window, 502), !sandbox && index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
+            EnableWindow(GetDlgItem(window, 509), !sandbox && index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
         }
         if (HIWORD(wp) == BN_CLICKED) switch (LOWORD(wp)) {
         case 502: connect_friend((int)SendMessageW(list, LB_GETCURSEL, 0, 0)); break;
@@ -285,6 +291,15 @@ void friends_init(HWND parent) {
     }
     (void)parent;
 }
+void friends_init_test(HWND parent,const WCHAR *peer) {
+    WNDCLASSW wc={0}; (void)parent;
+    wc.lpfnWndProc=proc; wc.hInstance=GetModuleHandleW(NULL); wc.lpszClassName=L"MurmurFriends";
+    wc.hCursor=LoadCursorW(NULL,IDC_ARROW); wc.hbrBackground=(HBRUSH)GetStockObject(WHITE_BRUSH); RegisterClassW(&wc);
+    sandbox=1; enabled=0; book.version=book.count=1;
+    wcscpy_s(book.items[0].name,64,peer);
+    notice=L"Test local : contact temporaire, sans modification de votre liste d’amis.";
+}
+void friends_connection_refresh(void) { if (sandbox) refresh(); }
 /* Timer messages are dispatched by the main loop, even when the panel is closed. */
 int friends_translate(MSG *message) {
     if (message->hwnd == ticker && message->message == WM_TIMER) { tick(); return 1; }

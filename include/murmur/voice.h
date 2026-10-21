@@ -11,6 +11,22 @@ typedef struct {
     unsigned buffered;
 } murmur_voice_stats;
 typedef struct murmur_voice murmur_voice;
+/* Empty device IDs follow the system default. IDs are backend-specific. */
+typedef struct {
+    uint8_t input_id[256], output_id[256];
+    unsigned input_selected, output_selected, input_volume, output_volume;
+} murmur_audio_config;
+typedef struct { char name[256]; uint8_t id[256]; } murmur_audio_device;
+void murmur_audio_defaults(murmur_audio_config *config);
+int murmur_audio_devices(int capture, murmur_audio_device *devices, unsigned capacity);
+murmur_voice *murmur_voice_create_config(int hardware, const murmur_audio_config *config);
+void murmur_voice_volume(murmur_voice *voice, unsigned input, unsigned output);
+typedef struct murmur_audio_preview murmur_audio_preview;
+/* Explicit local test: capture shows a meter, playback emits a quiet tone. */
+murmur_audio_preview *murmur_audio_preview_start(int capture, const murmur_audio_config *config);
+void murmur_audio_preview_stop(murmur_audio_preview *preview);
+unsigned murmur_audio_preview_level(murmur_audio_preview *preview);
+void murmur_audio_preview_volume(murmur_audio_preview *preview, unsigned input, unsigned output);
 /* Owner thread creates, encodes, decodes, changes mute and destroys.
  * hardware=0 never enumerates/opens devices, for deterministic offline tests.
  * hardware=1 opens the default duplex device and must follow explicit opt-in. */

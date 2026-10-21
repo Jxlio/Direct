@@ -27,10 +27,13 @@ $readme = @"
 DIRECT $version - MESSAGES ET APPELS - WINDOWS 10/11 64 BITS
 
 Extraire tout le ZIP puis ouvrir Direct.exe. Garder les fichiers ensemble.
-Le bouton Versions affiche l'historique et les mises a jour depuis Jxlio/Direct.
+Parametres > Versions affiche l'historique et les mises a jour depuis Jxlio/Direct.
 Une mise a jour signee est telechargee automatiquement au lancement, puis
 installee a la fermeture. Aucun appel n'est ferme pour appliquer une mise a jour.
 Les anciennes versions 0.5.x necessitent cette installation manuelle initiale.
+Parametres permet de choisir le micro et la sortie, regler les volumes et tester
+les peripheriques. Test solo ouvre deux clients locaux avec un audio simule :
+ce mode reste silencieux et ne reproduit pas deux acces Internet.
 
 Pour se connecter depuis deux logements : Mes amis > Connexion Internet.
 A cree une invitation ; B colle le code et repond ; A colle la reponse puis

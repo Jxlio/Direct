@@ -99,3 +99,23 @@ La capture WASAPI reelle, une conversation entre machines, l'echo, les changemen
 de peripherique, la consommation CPU/RAM en appel et la latence restent a valider.
 Linux et macOS ne sont pas encore compiles ni testes et n'ont pas d'interface
 vocale. Les tests ne constituent pas un audit de securite.
+
+
+## Réglages audio Windows
+
+Depuis 0.6.1, **Paramètres** permet de choisir le micro et la sortie audio,
+avec deux volumes indépendants de 0 à 100 %. Les volumes s’appliquent aussi
+pendant un appel ; changer de périphérique demande de raccrocher.
+Les identifiants de périphériques et les volumes sont conservés dans
+`%LOCALAPPDATA%/Murmur/audio-v1.dat` à la fermeture du panneau.
+Un périphérique enregistré mais absent doit être remplacé dans les paramètres.
+
+**Tester le micro** ouvre uniquement l’entrée et affiche son niveau, sans
+l’enregistrer ni le diffuser. **Écouter un son** ouvre uniquement la sortie
+sélectionnée et joue un signal local. Chaque test s’arrête après cinq secondes,
+à la fermeture du panneau ou lors d’un appel entrant. Le test solo conserve un
+audio entièrement simulé ; ses tests de périphériques sont désactivés.
+
+Les appels ont un état entrant explicite et demandent une réponse locale avant
+d’ouvrir les périphériques. L’état muet du correspondant est affiché et un
+raccrochage termine la participation des deux personnes.

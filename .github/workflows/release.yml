@@ -57,5 +57,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = Get-ChildItem out/release -File | Where-Object { $_.Extension -eq '.zip' -or $_.Name -like 'Direct-win-x64.*' } | ForEach-Object { $_.FullName }
-          gh release create "$env:GITHUB_REF_NAME" --draft --verify-tag --title "Direct $env:GITHUB_REF_NAME" --notes-file CHANGELOG.md @assets
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $pattern = '(?ms)^## ' + [regex]::Escape($version) + '[^\r\n]*\r?\n(.*?)(?=^## |\z)'
+          $notes = [regex]::Match((Get-Content CHANGELOG.md -Raw), $pattern)
+          if (!$notes.Success) { throw "Release notes missing for $version" }
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [IO.File]::WriteAllText($notesPath, $notes.Groups[1].Value.Trim())
+          gh release create "$env:GITHUB_REF_NAME" --draft --verify-tag --title "Direct $env:GITHUB_REF_NAME" --notes-file $notesPath @assets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

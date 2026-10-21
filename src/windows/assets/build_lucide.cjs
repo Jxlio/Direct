@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const {Resvg} = require(path.resolve(__dirname, '../../../out/icon-tools/node_modules/@resvg/resvg-js'));
-const names = ['message-circle', 'users', 'phone', 'phone-off', 'mic', 'mic-off', 'send', 'monitor', 'calendar-days', 'gamepad-2'];
+const names = ['message-circle', 'users', 'phone', 'phone-off', 'mic', 'mic-off', 'send', 'monitor', 'calendar-days', 'gamepad-2', 'settings'];
 const colors = ['#182234', '#687489', '#3a67f4', '#ffffff'];
 const root = path.join(__dirname, 'lucide');
 fs.mkdirSync(path.join(root, 'generated'), {recursive:true});

@@ -4,7 +4,7 @@
 
 - Cible : Windows x64, application portable dans un dossier où l'utilisateur
   dispose du droit d'écriture. Pas d'élévation administrateur.
-- Le bouton **Versions** affiche l'historique local intégré, même hors ligne,
+- Le panneau **Paramètres → Versions** affiche l'historique local intégré, même hors ligne,
   et les notes des dix dernières releases publiques de `Jxlio/Direct`.
 - Une vérification HTTPS au lancement cherche le manifeste de la dernière
   release stable. Le dépôt public ne nécessite aucun compte ou jeton côté client.

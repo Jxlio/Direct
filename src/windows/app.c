@@ -10,6 +10,8 @@
 #include "friends.h"
 #include "icons.h"
 #include "updates.h"
+#include "local_test.h"
+#include "settings.h"
 #ifdef _MSC_VER
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
@@ -23,9 +25,9 @@
 #define ID_MUTE 106
 #define MAX_MESSAGES 128
 #define MAX_TEXT 2048
-typedef struct { WCHAR text[MAX_TEXT + 1]; int room, remote; } Message;
+typedef struct { WCHAR text[MAX_TEXT + 1]; int room, remote; SYSTEMTIME time; } Message;
 static struct {
-    HWND input, send, voice, screen, mute, rooms[3], connection, invite, updates;
+    HWND input, send, voice, screen, mute, rooms[3], connection, invite, updates, test;
     HFONT normal, title, caption_font, heading;
     HBRUSH background, field;
     Message messages[MAX_MESSAGES];
@@ -33,7 +35,11 @@ static struct {
     int room;
     UINT dpi;
     WNDPROC edit_proc;
+    int test_mode, test_greeted, test_failed;
+    ULONGLONG test_deadline;
 } app;
+static const WCHAR *peer_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client B" : L"Client A") : L"Votre ami"; }
+static const WCHAR *self_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client A · vous" : L"Client B · vous") : L"Vous"; }
 static const WCHAR *rooms[] = { L"Messages", L"Organisation", L"Jeux" };
 static const WCHAR *descriptions[] = {
     L"Vos échanges avec l’ami connecté.",
@@ -47,6 +53,17 @@ static const COLORREF field_color = RGB(242, 245, 250);
 static int px(int n) { return MulDiv(n, (int)app.dpi, 96); }
 static int content_right(int width) { return width; }
 static const WCHAR *connection_description(void) {
+    static WCHAR simulated[256];
+    if (app.test_mode) {
+        if (app.test_failed) return L"TEST LOCAL · Échec de connexion. Fermez les deux clients et relancez Test solo.";
+        if (link_state()==2) {
+            swprintf_s(simulated,256,L"TEST LOCAL · %ls connecté · micro fermé · %u paquets audio reçus · %llu trames décodées",
+                peer_name(),link_voice_received_packets(),(unsigned long long)link_voice_decoded_frames());
+            return simulated;
+        }
+        if (!link_state() || link_state()==3) return L"TEST LOCAL · L’autre client est déconnecté. Vos messages de test restent affichés.";
+        return L"TEST LOCAL · Connexion automatique des deux clients sur ce PC…";
+    }
     if (link_state() == 3) return L"Connexion échouée. Ouvrez Mes amis → Options de connexion pour lire le diagnostic.";
     if (link_state() == 4) return L"Déconnexion en cours…";
     if (link_state() == 2) return L"Votre ami est connecté · conversation chiffrée.";
@@ -63,7 +80,8 @@ static const WCHAR *connection_description(void) {
 static const WCHAR *voice_description(void) {
     static const WCHAR *states[] = {L"Aucun appel en cours", L"En attente de votre ami…",
         L"Connexion à l’appel…", L"Appel en cours", L"Microphone coupé",
-        L"Appel indisponible"};
+        L"Erreur · vérifiez le son"};
+    if (!link_voice_requested() && (link_voice_remote()&1)) return L"Appel entrant · répondez ci-dessous";
     return states[link_voice_state()];
 }
 static void box(HDC dc, int x, int y, int w, int h, COLORREF color) {
@@ -142,19 +160,20 @@ static void layout(HWND window) {
     right = content_right(w);
     MoveWindow(app.input, px(300), px(h - 82), px(right - 448), px(26), TRUE);
     MoveWindow(app.send, px(right - 126), px(h - 91), px(90), px(42), TRUE);
-    MoveWindow(app.voice, px(28), px(h - 164), px(124), px(36), TRUE);
-    MoveWindow(app.mute, px(160), px(h - 164), px(64), px(36), TRUE);
+    MoveWindow(app.voice, px(28), px(468), px(140), px(38), TRUE);
+    MoveWindow(app.mute, px(176), px(468), px(48), px(38), TRUE);
     MoveWindow(app.screen, px(right - 216), px(20), px(188), px(34), TRUE);
     MoveWindow(app.updates, px(right - 344), px(20), px(116), px(34), TRUE);
     MoveWindow(app.connection, px(16), px(100), px(220), px(42), TRUE);
+    ShowWindow(app.test, SW_HIDE);
     MoveWindow(app.invite, px(300), px(h / 2 + 100), px(244), px(46), TRUE);
     {
-        size_t n; int any = 0;
-        for (n = 0; n < app.count; ++n) if (app.messages[n].room == app.room) any = 1;
+        int any = app.count != 0;
         ShowWindow(app.invite, !any && link_state() != 2 ? SW_SHOWNA : SW_HIDE);
     }
-    for (i = 0; i < 3; ++i)
-        MoveWindow(app.rooms[i], px(16), px(200 + 44 * i), px(220), px(38), TRUE);
+    MoveWindow(app.rooms[0],px(20),px(208),px(212),px(64),TRUE);
+    ShowWindow(app.rooms[0],link_state()==2 || app.count ? SW_SHOWNA:SW_HIDE);
+    for (i=1;i<3;++i) ShowWindow(app.rooms[i],SW_HIDE);
 }
 static void send_local(HWND window) {
     WCHAR text[MAX_TEXT + 1];
@@ -179,6 +198,7 @@ static void send_local(HWND window) {
     wcscpy_s(app.messages[app.count].text, MAX_TEXT + 1, text);
     app.messages[app.count++].room = app.room;
     app.messages[app.count - 1].remote = 0;
+    GetLocalTime(&app.messages[app.count-1].time);
     SetWindowTextW(app.input, L"");
     InvalidateRect(window, NULL, FALSE);
     SetFocus(app.input);
@@ -225,29 +245,39 @@ static void paint(HWND window, HDC dc) {
     icon(dc, 32, 32, 18, ICON_MESSAGE, RGB(255, 255, 255));
     label(dc, app.heading, fg, 70, 22, 148, 24, L"Direct", DT_SINGLELINE);
     label(dc, app.caption_font, muted, 70, 47, 148, 20, L"Messages et appels", DT_SINGLELINE);
-    label(dc, app.caption_font, muted, 30, 170, 190, 20, L"DISCUSSIONS", DT_SINGLELINE);
-    box(dc, 28, 352, 196, 1, RGB(229, 234, 242));
-    label(dc, app.caption_font, muted, 30, 374, 190, 20, L"APPEL VOCAL", DT_SINGLELINE);
-    glass(dc, 24, 407, 204, 64, 16, 155);
-    label(dc, app.heading, fg, 40, 417, 170, 23, L"Appeler votre ami", DT_SINGLELINE);
-    label(dc, app.caption_font, muted, 40, 442, 170, 20, voice_description(), DT_SINGLELINE | DT_END_ELLIPSIS);
-    glass(dc, 24, h-226, 204, 116, 18, 170);
-    label(dc, app.caption_font, link_state() == 2 ? RGB(36, 114, 83) : muted,
-        28, h-210, 196, 20, link_state() == 2 ? L"●  Votre ami est là" : L"○  Personne en ligne pour l’instant", DT_SINGLELINE | DT_END_ELLIPSIS);
-    label(dc, app.caption_font, muted, 28, h-188, 196, 20, L"Micro activé à votre demande.", DT_SINGLELINE | DT_END_ELLIPSIS);
+    label(dc,app.caption_font,muted,30,80,190,18,L"AMIS",DT_SINGLELINE);
+    label(dc,app.caption_font,muted,30,176,190,20,L"CONVERSATIONS",DT_SINGLELINE);
+    if(link_state()!=2 && !app.count) label(dc,app.caption_font,muted,30,218,180,52,L"Connectez un ami pour\ncommencer à discuter.",DT_WORDBREAK);
+    box(dc,28,308,196,1,RGB(229,234,242));
+    glass(dc,24,330,204,190,18,170);
+    label(dc,app.caption_font,accent,38,344,178,20,app.test_mode?L"APPEL · AUDIO SIMULÉ":L"APPEL VOCAL",DT_SINGLELINE);
+    label(dc,app.caption_font,fg,38,370,178,36,voice_description(),DT_WORDBREAK);
+    if(link_voice_requested() || (link_voice_remote()&1)) {
+        WCHAR participant[100];
+        swprintf_s(participant,100,L"%ls · %ls",peer_name(),(link_voice_remote()&1)?((link_voice_remote()&2)?L"micro coupé":link_voice_requested()?L"a rejoint":L"vous appelle"):L"en attente");
+        label(dc,app.caption_font,(link_voice_remote()&1)?RGB(36,114,83):muted,38,406,178,20,participant,DT_SINGLELINE|DT_END_ELLIPSIS);
+        if(link_voice_requested()) label(dc,app.caption_font,link_voice_state()==4?muted:RGB(36,114,83),38,430,178,20,link_voice_state()==4?L"Vous · micro coupé":app.test_mode?L"Vous · audio simulé":L"Vous · micro activé",DT_SINGLELINE);
+    } else label(dc,app.caption_font,muted,38,406,178,20,L"Lancez un appel à deux",DT_SINGLELINE);
     box(dc, 16, h-90, 220, 1, RGB(229, 234, 242));
-    rounded(dc, 24, h-67, 34, 34, 34, RGB(225, 238, 233));
-    label(dc, app.caption_font, RGB(36, 114, 83), 24, h-67, 34, 34, L"V", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    label(dc, app.normal, fg, 70, h-72, 148, 24, L"Vous", DT_SINGLELINE);
+    rounded(dc, 24, h-67, 34, 34, 34, RGB(222, 232, 255));
+    label(dc, app.caption_font, accent, 24, h-67, 34, 34, L"V", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    label(dc, app.normal, fg, 70, h-72, 148, 24, self_name(), DT_SINGLELINE);
     label(dc, app.caption_font, muted, 70, h-47, 148, 20,
         link_state() == 2 ? L"Connecté à votre ami" : link_state() == 1 ? L"Connexion en cours…" : link_state() == 3 ? L"Échec de connexion" : L"Sur cet appareil", DT_SINGLELINE);
     icon(dc, 281, 27, 20, ICON_MESSAGE, muted);
-    label(dc, app.heading, fg, 310, 24, w-660, 26, rooms[app.room], DT_SINGLELINE | DT_END_ELLIPSIS);
+    label(dc, app.heading, fg, 310, 24, w-660, 26, link_state()==2 || app.count ? peer_name() : L"Conversations", DT_SINGLELINE | DT_END_ELLIPSIS);
     box(dc, 252, 75, w-252, 1, RGB(234, 238, 245));
-    label(dc, app.caption_font, muted, 284, 94, w-320, 24, descriptions[app.room], DT_SINGLELINE | DT_END_ELLIPSIS);
+    label(dc, app.caption_font, muted, 284, 94, w-320, 24, link_state()==2 ? L"● En ligne · messages privés" : descriptions[app.room], DT_SINGLELINE | DT_END_ELLIPSIS);
     label(dc, app.caption_font, link_state() == 3 ? accent : muted, 284, 119, w-320, 20,
         connection_description(), DT_SINGLELINE | DT_END_ELLIPSIS);
-    for (i = 0; i < (int)app.count; ++i) if (app.messages[i].room == app.room) ++matching;
+    if(link_voice_requested() || (link_voice_remote()&1)) {
+        WCHAR call[160];
+        glass(dc,284,150,w-320,66,16,210);
+        swprintf_s(call,160,L"%ls · %ls",peer_name(),!link_voice_requested()?L"vous appelle":link_voice_state()==1?L"en attente de réponse":L"appel en cours");
+        label(dc,app.heading,accent,302,160,w-360,24,call,DT_SINGLELINE|DT_END_ELLIPSIS);
+        label(dc,app.caption_font,muted,302,188,w-360,20,app.test_mode?L"Test silencieux : aucun micro ni haut-parleur ouvert.":!link_voice_requested()?L"Cliquez Répondre dans le panneau d’appel.":link_voice_state()==4?L"Votre microphone est coupé.":(link_voice_remote()&2)?L"Votre ami a coupé son microphone.":L"Les commandes d’appel sont dans le panneau de gauche.",DT_SINGLELINE|DT_END_ELLIPSIS);
+    }
+    for (i = 0; i < (int)app.count; ++i) ++matching;
     if (!matching) {
         int top = h/2-138;
         glass(dc, 280, top-20, w-308, 328, 24, 125);
@@ -259,20 +289,24 @@ static void paint(HWND window, HDC dc) {
             link_state() == 2 ? L"Votre ami est connecté. Envoyez votre premier message\nou démarrez un appel vocal." :
             L"Ajoutez un ami, connectez-vous et commencez à discuter.\nVos échanges sont chiffrés de bout en bout.", DT_WORDBREAK);
     }
-    y = h-146;
+    y = h-138;
     for (i = (int)app.count-1; i >= 0; --i) {
-        RECT measure = {0, 0, px(w-380), 0}; HGDIOBJ old; int th, row;
-        if (app.messages[i].room != app.room) continue;
-        old = SelectObject(dc, app.normal);
-        DrawTextW(dc, app.messages[i].text, -1, &measure, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
-        SelectObject(dc, old); th = MulDiv(measure.bottom, 96, (int)app.dpi)+2; row = th+48;
-        if (y-row < 140) break;
-        y -= row;
-        rounded(dc, 284, y, 34, 34, 12, app.messages[i].remote ? RGB(229, 237, 255) : RGB(224, 240, 232));
-        label(dc, app.caption_font, app.messages[i].remote ? accent : RGB(36, 114, 83),
-            284, y, 34, 34, app.messages[i].remote ? L"A" : L"V", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        label(dc, app.heading, fg, 334, y-2, w-370, 24, app.messages[i].remote ? L"Votre ami" : L"Vous", DT_SINGLELINE);
-        label(dc, app.normal, fg, 334, y+26, w-380, th, app.messages[i].text, DT_WORDBREAK | DT_EDITCONTROL);
+        Message *m=&app.messages[i]; int bubble_width=(w-340)*3/4,x,th,row;
+        WCHAR author[120]; RECT measure={0,0,px(bubble_width-32),0}; HGDIOBJ old;
+
+        old=SelectObject(dc,app.normal);
+        DrawTextW(dc,m->text,-1,&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
+        SelectObject(dc,old); th=MulDiv(measure.bottom,96,(int)app.dpi)+4; row=th+72;
+        if(y-row<(link_voice_requested() || (link_voice_remote()&1)?230:148)) break;
+        y-=row; x=m->remote?330:w-38-bubble_width;
+        rounded(dc,x,y+24,bubble_width,th+24,16,m->remote?RGB(255,255,255):RGB(222,232,255));
+        rounded(dc,m->remote?284:x-44,y+26,32,32,32,m->remote?RGB(235,220,255):accent);
+        label(dc,app.caption_font,m->remote?RGB(123,69,184):RGB(255,255,255),m->remote?284:x-44,y+26,32,32,m->remote?(app.test_mode==1?L"B":L"A"):L"V",DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        if(m->room>0 && m->room<3) swprintf_s(author,120,L"%ls · %ls · %02u:%02u",m->remote?peer_name():self_name(),rooms[m->room],m->time.wHour,m->time.wMinute);
+        else swprintf_s(author,120,L"%ls   ·   %02u:%02u",m->remote?peer_name():self_name(),m->time.wHour,m->time.wMinute);
+        label(dc,app.caption_font,m->remote?RGB(123,69,184):accent,x,y,bubble_width,20,author,DT_SINGLELINE);
+        { int saved=SaveDC(dc); IntersectClipRect(dc,px(x+16),px(y+36),px(x+bubble_width-16),px(y+36+th));
+          label(dc,app.normal,fg,x+16,y+36,bubble_width-32,th,m->text,DT_WORDBREAK|DT_EDITCONTROL); RestoreDC(dc,saved); }
     }
     glass(dc, 280, h-108, w-308, 72, 18, 210);
     rounded(dc, 294, h-91, w-432, 40, 12, field_color);
@@ -283,8 +317,9 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
     switch (message) {
     case WM_CREATE:
         link_init(window);
-        friends_init(window);
-        updates_init(window);
+        settings_init(app.test_mode);
+        if (app.test_mode) friends_init_test(window,peer_name());
+        else { friends_init(window); updates_init(window); }
         app.dpi = GetDpiForWindow(window);
         app.background = CreateSolidBrush(bg);
         app.field = CreateSolidBrush(field_color);
@@ -303,10 +338,13 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         EnableWindow(app.screen, FALSE);
         EnableWindow(app.voice, FALSE);
         EnableWindow(app.send, FALSE);
-        app.connection = CreateWindowW(L"BUTTON", L"Mes amis", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        app.connection = CreateWindowW(L"BUTTON", L"Amis · ajouter et gérer", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             0, 0, 0, 0, window, (HMENU)(INT_PTR)105, NULL, NULL);
-        app.updates = CreateWindowW(L"BUTTON", L"Versions", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        app.updates = CreateWindowW(L"BUTTON", L"Paramètres", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             0, 0, 0, 0, window, (HMENU)(INT_PTR)108, NULL, NULL);
+        app.test = CreateWindowW(L"BUTTON", app.test_mode ? L"Test local · 2 clients" : L"Test solo · ouvrir 2 clients", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            0, 0, 0, 0, window, (HMENU)(INT_PTR)109, NULL, NULL);
+        EnableWindow(app.updates,TRUE); EnableWindow(app.test,!app.test_mode);
         SendMessageW(app.connection, WM_SETFONT, (WPARAM)app.normal, TRUE);
         app.invite = CreateWindowW(L"BUTTON", L"Ajouter ou connecter un ami  →", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
             0, 0, 0, 0, window, (HMENU)(INT_PTR)107, NULL, NULL);
@@ -327,6 +365,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         enhance_button(app.send); enhance_button(app.voice); enhance_button(app.mute);
         enhance_button(app.screen); enhance_button(app.connection); enhance_button(app.invite);
         enhance_button(app.updates);
+        enhance_button(app.test);
         { int i; for (i = 0; i < 3; ++i) enhance_button(app.rooms[i]); }
         layout(window);
         return 0;
@@ -356,7 +395,9 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         if (LOWORD(wp) == ID_MUTE && HIWORD(wp) == BN_CLICKED) link_voice_mute_toggle();
         if (LOWORD(wp) == 105 && HIWORD(wp) == BN_CLICKED) friends_show(window);
         if (LOWORD(wp) == 107 && HIWORD(wp) == BN_CLICKED) friends_show(window);
-        if (LOWORD(wp) == 108 && HIWORD(wp) == BN_CLICKED) updates_show(window);
+        if (LOWORD(wp) == 108 && HIWORD(wp) == BN_CLICKED) settings_show(window);
+        if (LOWORD(wp) == 109 && HIWORD(wp) == BN_CLICKED && local_test_launch(window))
+            MessageBoxW(window,L"Impossible d’ouvrir le test local.",L"Direct · Test solo",MB_OK|MB_ICONWARNING);
         if (LOWORD(wp) >= 200 && LOWORD(wp) <= 202 && HIWORD(wp) == BN_CLICKED) {
             int i;
             app.room = LOWORD(wp) - 200;
@@ -369,7 +410,17 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
             MessageBoxW(window, L"Le partage d’écran reste à intégrer.\nAucun écran n’est capturé.",
                 L"Fonction en préparation", MB_OK | MB_ICONINFORMATION);
         return 0;
-    case WM_DIRECT_UPDATE: updates_refresh(); return 0;
+    case WM_TIMER:
+        if (app.test_mode && wp==904) {
+            local_test_tick();
+            if (app.test_greeted && !link_voice_requested()) KillTimer(window,904);
+            if (GetTickCount64()>app.test_deadline && !app.test_greeted && link_state()!=2) {
+                app.test_failed=1; local_test_close(); link_stop(); KillTimer(window,904);
+            }
+            InvalidateRect(window,NULL,FALSE);
+        }
+        return 0;
+    case WM_DIRECT_UPDATE: if (!app.test_mode) updates_refresh(); return 0;
     case WM_MURMUR_LINK: {
         link_message incoming;
         while (link_receive(&incoming)) {
@@ -387,16 +438,28 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
             wcscpy_s(app.messages[app.count].text, MAX_TEXT + 1, text);
             app.messages[app.count].room = (int)incoming.room;
             app.messages[app.count++].remote = 1;
+            GetLocalTime(&app.messages[app.count-1].time);
         }
         SecureZeroMemory(&incoming, sizeof(incoming));
-        SetWindowTextW(app.voice, link_voice_requested() ? L"Raccrocher" : L"Appeler");
+        if (app.test_mode && link_state()==2 && !app.test_greeted) {
+            app.test_greeted=1;
+            SetWindowTextW(app.input,app.test_mode==1 ? L"Bonjour depuis le client A. Ce message traverse la connexion chiffrée locale." : L"Bonjour depuis le client B. Vous pouvez écrire ici et tester l’appel simulé.");
+            send_local(window);
+        }
+        SetWindowTextW(app.voice, link_voice_requested() ? (link_voice_state()==1?L"Annuler":L"Raccrocher") : (link_voice_remote()&1) ? L"Répondre" : app.test_mode ? L"Tester l’appel" : L"Appeler");
         SetWindowTextW(app.mute, link_voice_state() == 4 ? L"Activer le microphone" : L"Couper le microphone");
         EnableWindow(app.mute, link_voice_requested());
         EnableWindow(app.voice, link_state() == 2);
         EnableWindow(app.send, link_state() == 2);
+        if (app.test_mode && link_voice_requested()) SetTimer(window,904,500,NULL);
+        EnableWindow(app.test,!app.test_mode && !link_busy());
+        SetWindowTextW(app.connection,link_state()==2 ? L"Amis · 1 en ligne" : L"Amis · ajouter et gérer");
+        SetWindowTextW(app.rooms[0],peer_name());
+        settings_refresh();
         layout(window);
         connection_refresh();
         connection_auto_refresh();
+        friends_connection_refresh();
         InvalidateRect(window, NULL, FALSE);
         return 0;
     }
@@ -409,7 +472,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         WCHAR text[80];
         int width = MulDiv(item->rcItem.right, 96, (int)app.dpi);
         int height = MulDiv(item->rcItem.bottom, 96, (int)app.dpi);
-        BOOL primary = item->CtlID == ID_SEND || item->CtlID == 107;
+        BOOL primary = item->CtlID == ID_SEND || item->CtlID == 107 || item->CtlID == ID_VOICE;
         BOOL channel = item->CtlID >= 200 && item->CtlID <= 202;
         BOOL selected = channel && (int)(item->CtlID - 200) == app.room;
         BOOL hover = GetPropW(item->hwndItem, L"hover") && !(item->itemState & ODS_DISABLED);
@@ -419,14 +482,23 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         if (hover) fill = primary ? RGB(79, 120, 255) : RGB(233, 238, 248);
         if (item->itemState & ODS_SELECTED) fill = primary ? RGB(43, 83, 210) : RGB(221, 230, 247);
         if (item->itemState & ODS_DISABLED) fill = item->CtlID == ID_SEND ? RGB(230, 234, 242) : surface;
+        if(item->CtlID==ID_VOICE && !(item->itemState&ODS_DISABLED) && link_voice_requested()) fill=(hover || (item->itemState&ODS_SELECTED))?RGB(190,53,76):RGB(217,66,91);
         box(item->hDC, 0, 0, width, height, surface);
         rounded(item->hDC, 0, 0, width, height, 12,
             fill);
         GetWindowTextW(item->hwndItem, text, 80);
+        if(item->CtlID==200) {
+            rounded(item->hDC,10,15,32,32,32,RGB(235,220,255));
+            label(item->hDC,app.normal,RGB(123,69,184),10,15,32,32,app.test_mode==1?L"B":L"A",DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            label(item->hDC,app.heading,fg,52,10,width-60,24,text,DT_SINGLELINE|DT_END_ELLIPSIS);
+            label(item->hDC,app.caption_font,link_state()==2?RGB(36,114,83):muted,52,36,width-60,20,link_state()==2?L"● En ligne":L"○ Hors ligne",DT_SINGLELINE);
+            if(item->itemState&ODS_FOCUS) { RECT focus=item->rcItem; InflateRect(&focus,-4,-4); DrawFocusRect(item->hDC,&focus); }
+            return TRUE;
+        }
         if (selected) rounded(item->hDC, 0, 9, 3, height-18, 3, accent);
         {
             enum direct_icon kind = channel ? (item->CtlID == 201 ? ICON_CALENDAR : item->CtlID == 202 ? ICON_GAME : ICON_MESSAGE) :
-                item->CtlID == 105 || item->CtlID == 107 ? ICON_USERS : item->CtlID == 108 ? ICON_CALENDAR : item->CtlID == ID_SEND ? ICON_SEND :
+                item->CtlID == 105 || item->CtlID == 107 || item->CtlID == 109 ? ICON_USERS : item->CtlID == 108 ? ICON_SETTINGS : item->CtlID == ID_SEND ? ICON_SEND :
                 item->CtlID == ID_VOICE ? (link_voice_requested() ? ICON_HANGUP : ICON_PHONE) :
                 item->CtlID == ID_MUTE ? (link_voice_state() == 4 ? ICON_MIC_OFF : ICON_MIC) : ICON_MONITOR;
             COLORREF color = (item->itemState & ODS_DISABLED) ? muted : primary ? RGB(255, 255, 255) : selected ? accent : fg;
@@ -457,8 +529,10 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         return 0;
     }
     case WM_DESTROY:
+        settings_close();
         friends_close();
-        updates_shutdown();
+        if (!app.test_mode) updates_shutdown();
+        else { KillTimer(window,904); local_test_close(); }
         link_stop();
         DeleteObject(app.normal);
         DeleteObject(app.title);
@@ -478,7 +552,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
     MSG message;
     BOOL result;
     (void)previous;
-    (void)command;
+    app.test_mode=!wcscmp(command,L"--test-pair") ? 1 : !wcscmp(command,L"--test-peer") ? 2 : 0;
     if (updates_apply_command()) return 0;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     app.dpi = GetDpiForSystem();
@@ -488,7 +562,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     if (!RegisterClassW(&wc)) return 1;
-    window = CreateWindowExW(0, wc.lpszClassName, L"Direct — Messages et appels",
+    window = CreateWindowExW(0, wc.lpszClassName, app.test_mode ? (app.test_mode==1 ? L"Direct — Client A · test local" : L"Direct — Client B · test local") : L"Direct — Messages et appels",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         px(1220), px(820), NULL, NULL, instance, NULL);
     if (!window) return 1;
@@ -502,8 +576,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
           DwmSetWindowAttribute(window, 33, &corners, sizeof(corners)); }
     }
     ShowWindow(window, show);
+    if (app.test_mode) {
+        MONITORINFO monitor={sizeof(monitor)}; int width,height,x,y;
+        GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&monitor);
+        width=(monitor.rcWork.right-monitor.rcWork.left)/2-12; height=monitor.rcWork.bottom-monitor.rcWork.top-24;
+        x=monitor.rcWork.left+8+(app.test_mode==2 ? width+8 : 0); y=monitor.rcWork.top+12;
+        if (width<px(820)) { width=px(900); x=monitor.rcWork.left+(app.test_mode==2 ? 120 : 24); y+=app.test_mode==2 ? 60 : 0; }
+        SetWindowPos(window,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE);
+        app.test_deadline=GetTickCount64()+25000;
+        if (local_test_start(window,app.test_mode==2)) { app.test_failed=1; MessageBoxW(window,L"Impossible de démarrer le test. Lancez Test solo depuis la fenêtre principale.",L"Direct · Test local",MB_OK|MB_ICONWARNING); }
+        else SetTimer(window,904,250,NULL);
+    }
     while ((result = GetMessageW(&message, NULL, 0, 0)) > 0) {
-        if (!updates_translate(&message) && !friends_translate(&message) && !connection_auto_translate(&message) && !connection_translate(&message) && !IsDialogMessageW(window, &message)) {
+        if (!settings_translate(&message) && !updates_translate(&message) && !friends_translate(&message) && !connection_auto_translate(&message) && !connection_translate(&message) && !IsDialogMessageW(window, &message)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }

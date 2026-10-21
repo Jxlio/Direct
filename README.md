@@ -26,6 +26,7 @@ Pour le vocal, les deux personnes doivent activer l’appel.
 ## Ce qui fonctionne
 
 - Messages texte chiffrés et appels vocaux à deux.
+- Choix du micro et de la sortie audio, volumes séparés et tests des périphériques.
 - Liste d’amis enregistrée localement et recherche sur le réseau local.
 - Connexion directe avec ICE/STUN et prise en charge d’un relais TURN configurable.
 - Historique des versions et mises à jour signées depuis GitHub Releases.
@@ -33,7 +34,7 @@ Pour le vocal, les deux personnes doivent activer l’appel.
 
 ## En développement
 
-Direct est encore un prototype. L’interface et les réglages audio doivent évoluer.
+Direct est encore un prototype. L’interface continue d’évoluer.
 Le partage d’écran, les appels de groupe et les interfaces Linux et macOS ne sont
 pas disponibles.
 
