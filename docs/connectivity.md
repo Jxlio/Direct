@@ -1,3 +1,6 @@
+> Mode Internet manuel avancé. Pour l’ajout unique et la connexion automatique,
+> voir [Amis](friends.md).
+
 # Connexion ICE (0.4)
 
 Depuis 0.5, ce panneau est accessible via **Mes amis > Connexion avancee**.

@@ -1,5 +1,14 @@
 # Direct — historique des versions
 
+## 0.7.0 — 21 octobre 2026
+
+- Mise en relation automatique via un service privé Cloudflare Workers Free.
+- Nouveau code ami : un seul échange transmet aussi la configuration du service.
+- Reconnexion du service et nouvelles tentatives P2P sans échanger de codes de session.
+- Descriptions de connexion chiffrées, challenge de session et routes opaques.
+- Présence des amis et nom du correspondant dans la conversation.
+- Aucun relais TURN activé : les réseaux bloquant le P2P peuvent rester incompatibles.
+
 ## 0.6.1 — 21 octobre 2026
 
 - Navigation séparée entre amis et conversations, avec avatar et présence du correspondant.

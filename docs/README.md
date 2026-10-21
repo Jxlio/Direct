@@ -5,7 +5,7 @@ Ce dossier décrit le fonctionnement du prototype et ses limites.
 
 | Sujet | Contenu |
 | --- | --- |
-| [Amis](friends.md) | Contacts locaux, invitations et découverte sur le réseau local |
+| [Amis](friends.md) | Ajout unique, connexion automatique Internet et découverte locale |
 | [Connexion Internet](connectivity.md) | Échange des invitations, ICE, STUN et TURN |
 | [Configuration manuelle](manual-network.md) | Ancien mode de connexion par adresse IP |
 | [Relais](relay.md) | Configuration et hébergement du relais |

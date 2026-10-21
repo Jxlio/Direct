@@ -12,6 +12,7 @@
 #include "updates.h"
 #include "local_test.h"
 #include "settings.h"
+#include "signaling.h"
 #ifdef _MSC_VER
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
@@ -25,7 +26,7 @@
 #define ID_MUTE 106
 #define MAX_MESSAGES 128
 #define MAX_TEXT 2048
-typedef struct { WCHAR text[MAX_TEXT + 1]; int room, remote; SYSTEMTIME time; } Message;
+typedef struct { WCHAR text[MAX_TEXT + 1]; int room, remote; WCHAR author[64]; SYSTEMTIME time; } Message;
 static struct {
     HWND input, send, voice, screen, mute, rooms[3], connection, invite, updates, test;
     HFONT normal, title, caption_font, heading;
@@ -37,8 +38,9 @@ static struct {
     WNDPROC edit_proc;
     int test_mode, test_greeted, test_failed;
     ULONGLONG test_deadline;
+    uint8_t last_peer[32]; int have_peer;
 } app;
-static const WCHAR *peer_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client B" : L"Client A") : L"Votre ami"; }
+static const WCHAR *peer_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client B" : L"Client A") : friends_peer_name()?friends_peer_name():L"Votre ami"; }
 static const WCHAR *self_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client A · vous" : L"Client B · vous") : L"Vous"; }
 static const WCHAR *rooms[] = { L"Messages", L"Organisation", L"Jeux" };
 static const WCHAR *descriptions[] = {
@@ -68,6 +70,7 @@ static const WCHAR *connection_description(void) {
     if (link_state() == 4) return L"Déconnexion en cours…";
     if (link_state() == 2) return L"Votre ami est connecté · conversation chiffrée.";
     if (link_state() != 1) return L"";
+    if (friends_auto_connecting()) return L"Connexion automatique : recherche d’un chemin direct et authentification…";
     if (!link_ice_mode()) return L"Connexion manuelle en cours…";
     switch (link_ice_phase()) {
     case -2: return L"Réponse invalide. Utilisez la réponse correspondant à votre invitation en cours.";
@@ -199,6 +202,7 @@ static void send_local(HWND window) {
     app.messages[app.count++].room = app.room;
     app.messages[app.count - 1].remote = 0;
     GetLocalTime(&app.messages[app.count-1].time);
+    wcscpy_s(app.messages[app.count-1].author,64,app.messages[app.count-1].remote?peer_name():self_name());
     SetWindowTextW(app.input, L"");
     InvalidateRect(window, NULL, FALSE);
     SetFocus(app.input);
@@ -302,8 +306,8 @@ static void paint(HWND window, HDC dc) {
         rounded(dc,x,y+24,bubble_width,th+24,16,m->remote?RGB(255,255,255):RGB(222,232,255));
         rounded(dc,m->remote?284:x-44,y+26,32,32,32,m->remote?RGB(235,220,255):accent);
         label(dc,app.caption_font,m->remote?RGB(123,69,184):RGB(255,255,255),m->remote?284:x-44,y+26,32,32,m->remote?(app.test_mode==1?L"B":L"A"):L"V",DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-        if(m->room>0 && m->room<3) swprintf_s(author,120,L"%ls · %ls · %02u:%02u",m->remote?peer_name():self_name(),rooms[m->room],m->time.wHour,m->time.wMinute);
-        else swprintf_s(author,120,L"%ls   ·   %02u:%02u",m->remote?peer_name():self_name(),m->time.wHour,m->time.wMinute);
+        if(m->room>0 && m->room<3) swprintf_s(author,120,L"%ls · %ls · %02u:%02u",m->author,rooms[m->room],m->time.wHour,m->time.wMinute);
+        else swprintf_s(author,120,L"%ls   ·   %02u:%02u",m->author,m->time.wHour,m->time.wMinute);
         label(dc,app.caption_font,m->remote?RGB(123,69,184):accent,x,y,bubble_width,20,author,DT_SINGLELINE);
         { int saved=SaveDC(dc); IntersectClipRect(dc,px(x+16),px(y+36),px(x+bubble_width-16),px(y+36+th));
           label(dc,app.normal,fg,x+16,y+36,bubble_width-32,th,m->text,DT_WORDBREAK|DT_EDITCONTROL); RestoreDC(dc,saved); }
@@ -420,9 +424,15 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
             InvalidateRect(window,NULL,FALSE);
         }
         return 0;
+    case WM_DIRECT_SIGNAL: if(!app.test_mode) friends_internet_event(); return 0;
     case WM_DIRECT_UPDATE: if (!app.test_mode) updates_refresh(); return 0;
     case WM_MURMUR_LINK: {
         link_message incoming;
+        uint8_t current_peer[32];
+        if(!app.test_mode && friends_peer_id(current_peer)) {
+            if(app.have_peer && memcmp(app.last_peer,current_peer,32)) { SecureZeroMemory(app.messages,sizeof(app.messages)); app.count=0; }
+            memcpy(app.last_peer,current_peer,32); app.have_peer=1;
+        }
         while (link_receive(&incoming)) {
             WCHAR text[MAX_TEXT + 1];
             int length;
@@ -439,6 +449,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
             app.messages[app.count].room = (int)incoming.room;
             app.messages[app.count++].remote = 1;
             GetLocalTime(&app.messages[app.count-1].time);
+    wcscpy_s(app.messages[app.count-1].author,64,app.messages[app.count-1].remote?peer_name():self_name());
         }
         SecureZeroMemory(&incoming, sizeof(incoming));
         if (app.test_mode && link_state()==2 && !app.test_greeted) {

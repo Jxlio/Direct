@@ -9,3 +9,6 @@ relay.env
 *.key
 *.pfx
 /src/windows/assets/lucide/generated/*.png
+node_modules/
+.wrangler/
+.dev.vars

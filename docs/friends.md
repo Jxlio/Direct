@@ -1,74 +1,95 @@
-# Amis persistants (0.5, Windows)
+# Amis et connexion automatique
 
-## Utilisation
+## Ajouter un ami une fois
 
-1. Ouvrir **Mes amis**, donner un nom au proche et **Creer un code pour cet ami**.
-   L'ajout est enregistre avant d'afficher le code.
-2. Transmettre ce code en prive a cette personne uniquement. Elle saisit un nom
-   pour vous, colle le code puis clique **Ajouter le code recu**. Pas de code retour.
-3. A chaque session, selectionner cet ami et cliquer **Retrouver sur ce reseau**
-   des deux cotes. Les applications doivent etre sur le meme reseau IPv4 avec
-   les broadcasts autorises. Aucun serveur ni adresse IP a saisir.
-4. Une fois connectes, utiliser les salons texte et rejoindre volontairement le vocal.
+Avec Direct 0.7, **Amis → Créer un code ami** produit une invitation privée.
+Le créateur choisit un nom local pour le correspondant et transmet le code.
+L’autre personne choisit un nom et utilise **Ajouter avec ce code**.
+Les noms ne sont pas des identités certifiées.
 
-Le parcours existe dans l'executable Windows natif. La decouverte entre deux
-PC physiques et le parcours visuel restent a valider. Les reseaux invites avec
-isolation des clients, VPN ou pare-feu peuvent empecher la decouverte.
-Ne pas desactiver le pare-feu ; une autorisation reseau prive pour Murmur peut
-etre necessaire. Le port de decouverte est UDP 49381, en plus des ports ICE
-dynamiques. Une seule recherche simultanee par PC et une seule session a deux.
+Un code `direct2|…` contient le secret de la relation et la configuration du
+service privé de mise en relation. Une fois enregistré, Direct ouvre une seule
+connexion WebSocket HTTPS pour les contacts du groupe et négocie automatiquement
+une session ICE/DTLS quand un ami est disponible. Il n’y a pas de serveur à lancer
+sur les PC ni de code d’offre/réponse à échanger à chaque session.
 
-## Conservation et securite
+Le service doit avoir été configuré une fois par l’organisateur du groupe.
+Les autres amis n’ont pas besoin de compte Cloudflare. Une installation sans
+service configuré peut importer un code Direct récent pour recevoir cette
+configuration. Un seul groupe de mise en relation est pris en charge par profil.
+Un code provenant d’un autre groupe ne remplace pas la configuration existante.
 
-- Maximum 16 relations. Le nom est local, il n'est pas une identite certifiee.
-- Chaque code contient un secret aleatoire de 256 bits distinct. C'est une
-  invitation privee reutilisable : toute personne qui la recoit peut se faire
-  passer pour l'ami. Ne pas publier le code ni le reutiliser pour plusieurs amis.
-- Les roles de connexion sont determines a l'ajout : le createur propose,
-  l'importateur repond. Les deux peuvent commencer la recherche dans n'importe
-  quel ordre. Le code ne contient aucune adresse reseau de session a conserver.
-- Stockage `%LOCALAPPDATA%\Murmur\friends.dat`, chiffre avec Windows DPAPI
-  pour le compte utilisateur courant. Ecriture temporaire puis remplacement.
-  Un fichier altere ou indechiffrable est conserve et bloque les modifications.
-  Ce stockage n'est pas une sauvegarde portable entre comptes ou ordinateurs.
-- La decouverte utilise AES-256-GCM de Mbed TLS et une cle derivee par HKDF-SHA256
-  avec domaine dedie. Les descriptions ICE et leur cle de session ne circulent
-  pas en clair sur le reseau local. Chaque paquet utilise un nonce aleatoire.
-- Une tentative utilise un identifiant aleatoire de 256 bits ; une reponse d'une
-  autre tentative est ignoree. Une offre ancienne authentique peut encore etre
-  rejouee pendant une recherche et provoquer son echec ; il n'y a pas de journal
-  persistant anti-rejeu ni de garantie contre le deni de service sur le LAN.
-- Recherche bornee a 120 secondes, jusqu'a 8 datagrammes traites par seconde,
-  un envoi par seconde, arret de la minuterie et fermeture de la socket une fois
-  connecte ou annule. Aucun balayage continu a l'ouverture de l'application.
-- **Oublier cet ami** supprime le secret local et empeche son ancien code de
-  retrouver ce PC. Une relation compromise doit etre supprimee puis recreee
-  avec un nouveau code. Aucun mecanisme de revocation distant n'existe encore.
-- La session media/texte conserve les protections DTLS existantes. Le protocole
-  d'appairage et l'application n'ont pas fait l'objet d'un audit de securite.
+## Connexion et reconnexion
 
-## Internet
+- Maximum 16 contacts enregistrés ; une seule conversation P2P simultanée.
+- L’application tente de rejoindre un ami disponible. Les autres sessions attendent.
+- Une perte du service déclenche une reconnexion avec attente progressive.
+- Une tentative de session dispose de 35 secondes. Après échec, une nouvelle
+  tentative P2P est espacée d’au moins une minute.
+- **Annuler la connexion** suspend la reconnexion P2P jusqu’à son rétablissement
+  depuis **Reconnexion automatique** ou au prochain lancement.
+- Garder une seule instance normale de Direct ouverte par profil. Les fenêtres
+  du test solo sont isolées et n’utilisent pas le service.
+- Le vocal demande toujours une action locale et la réponse de l’autre personne.
+- Le nom et les messages affichés correspondent à la session courante. En changeant
+  d’ami, la conversation précédente en mémoire est effacée ; il n’y a pas encore
+  d’archive locale des conversations.
 
-Cette etape automatise uniquement le LAN. Le mode **Connexion avancee** conserve
-ICE/STUN/TURN avec echange manuel pour les tests Internet. Les codes amis ne
-configurent pas de service Internet et le relais TURN existant ne remplace pas
-un service de rendez-vous.
+## Sécurité et stockage
 
-L'etape suivante est un service commun disponible en permanence pour transporter
-les descriptions de session chiffrees, avec expiration, limites d'abus et
-authentification. Son hebergement se configure une fois pour le groupe ; les amis
-ne doivent pas lancer un serveur a chaque appel. Aucun service n'est encore
-deploye et aucune promesse de connexion automatique entre logements n'est faite.
+Le code contient deux secrets : celui de la relation, différent pour chaque ami,
+et celui qui autorise l’accès au service du groupe. Le code est destiné à une
+seule personne de confiance et ne doit jamais apparaître dans une issue publique.
+Une personne possédant le secret de relation peut se faire passer pour cet ami.
 
-## Verification
+Le secret de relation n’est jamais envoyé au serveur. Une route opaque en est
+dérivée par HKDF-SHA256. Les descriptions de connexion sont protégées par
+AES-256-GCM avec un domaine distinct du protocole LAN. Une réponse est liée au
+challenge aléatoire courant ; le challenge d’offre est consommé à son acceptation.
+Le transport des conversations utilise ensuite DTLS comme auparavant.
 
-Les tests automatises couvrent le code ami, le mauvais secret, chaque octet d'un
-paquet modifie, les limites, les enveloppes autour de vraies offres/reponses ICE
-(chemin direct et relais local), l'aller-retour de stockage DPAPI, l'absence de
-secret litteral dans le fichier et le rejet d'une sauvegarde alteree sans ecraser
-l'etat en memoire. Un test supplementaire utilise le controleur de decouverte
-reel entre deux processus sur deux ports UDP loopback : echange automatique
-d'offres/reponses, connexion DTLS, messages aller-retour et micro ferme. Ce test
-remplace uniquement le broadcast par une destination loopback connue ; il ne
-touche pas au profil utilisateur. Ils n'ouvrent pas le micro, n'utilisent pas de service public
-et ne valident pas encore le broadcast entre deux machines physiques.
+Le service observe les adresses IP des connexions WebSocket, leur présence,
+les routes et les tailles des enveloppes, mais ne reçoit ni texte de conversation,
+ni audio, ni secret de relation en clair. Il peut interrompre ou perturber la
+mise en relation. Le protocole n’a pas subi d’audit indépendant.
+
+Les contacts (`friends.dat`) et le profil du service (`service.dat`) sont protégés
+par Windows DPAPI dans `%LOCALAPPDATA%/Murmur`. Ils sont liés au compte Windows.
+Un fichier invalide n’est pas déchiffré en partie. Une écriture utilise un fichier
+temporaire et un remplacement sur le même volume.
+
+Oublier un ami supprime son secret local et sa route de présence. Pour révoquer
+un code compromis, oublier la relation et en recréer une avec un nouveau secret.
+Le secret du groupe peut être renouvelé côté Cloudflare et dans les profils du
+groupe ; cela impose de redistribuer la configuration aux membres autorisés.
+
+## Gratuité et limites réseau
+
+Le service utilise Workers Free et des Durable Objects SQLite avec WebSocket
+hibernation. Il n’a ni relais média ni stockage de messages. Ne pas passer le
+compte à une formule payante si une coupure aux limites gratuites est souhaitée.
+Les quotas s’appliquent à l’ensemble du compte Cloudflare.
+
+La découverte du chemin direct utilise le STUN public Cloudflare. Aucun TURN
+n’est activé automatiquement et aucune offre facturable n’est souscrite par le
+projet. Les réseaux qui exigent un relais peuvent toujours empêcher la session.
+La mise en relation automatique ne contourne pas cette limite du P2P.
+
+Installation du service : [service/README.md](../service/README.md).
+Tarifs et limites : [Workers](https://developers.cloudflare.com/workers/platform/pricing/),
+[Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/),
+[STUN/TURN](https://developers.cloudflare.com/realtime/turn/faq/).
+
+## Compatibilité et validation
+
+Les anciens codes `mfriend1…` sont conservés et permettent la découverte LAN.
+Sans service configuré, le bouton de connexion utilise encore cette découverte,
+avec broadcast IPv4 sur UDP 49381 et ports ICE dynamiques. Le mode Internet
+manuel reste accessible comme outil avancé.
+
+Les tests locaux couvrent les invitations, la séparation des domaines de
+chiffrement, les enveloppes altérées, les limites, le stockage des contacts et
+le contrôleur LAN. Le test explicite `online_tests --run` utilise le service
+configuré pour connecter deux processus sans consulter ni modifier les contacts
+personnels. Leurs candidats ICE restent sur loopback et aucun périphérique audio
+n’est ouvert. Il valide le trajet de signalisation public, pas deux NAT Internet.

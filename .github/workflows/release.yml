@@ -23,6 +23,15 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Test free rendezvous service
+        working-directory: service
+        run: |
+          npm ci --ignore-scripts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npx wrangler deploy --dry-run
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package portable application
         run: ./scripts/package_windows.ps1
       - name: Install signing dependency

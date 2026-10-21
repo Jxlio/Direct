@@ -35,9 +35,11 @@ Parametres permet de choisir le micro et la sortie, regler les volumes et tester
 les peripheriques. Test solo ouvre deux clients locaux avec un audio simule :
 ce mode reste silencieux et ne reproduit pas deux acces Internet.
 
-Pour se connecter depuis deux logements : Mes amis > Connexion Internet.
-A cree une invitation ; B colle le code et repond ; A colle la reponse puis
-clique Appliquer la reponse. Ne jamais publier ces codes prives.
+Pour ajouter un ami : Amis > Creer un code ami. Envoyer le code en prive.
+L'autre personne l'ajoute avec son nom. Un code Direct 0.7 comprenant le service
+Internet configure la connexion automatique aux lancements suivants.
+Les anciens codes restent utilisables sur le reseau local. Le mode Internet
+manuel reste disponible comme outil avance. Ne jamais publier les codes prives.
 Certaines box necessitent un relais TURN. Aucun relais public n'est deploye.
 Le partage d'ecran reste a faire. Le logiciel n'a pas ete audite ni signe Authenticode.
 "@

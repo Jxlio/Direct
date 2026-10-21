@@ -1,0 +1,7 @@
+{
+  "name": "direct-rendezvous",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test test.mjs", "dev": "wrangler dev --ip 127.0.0.1 --port 8787", "deploy": "wrangler deploy" },
+  "devDependencies": { "wrangler": "4.151.3", "ws": "8.22.0" }
+}

@@ -1,6 +1,7 @@
 # Relais STUN/TURN a heberger plus tard
 
-Aucun serveur Internet n'a ete cree ou deploye. Le projet fournit un executable
+Aucun relais TURN Internet n'est deploye. Le service de mise en relation gratuit
+est decrit dans [friends.md](friends.md). Le projet fournit un executable
 murmur-relay (Windows : build/Release/murmur-relay.exe), base sur le serveur
 STUN/TURN de libjuice. Il est facultatif pour les connexions directes possibles.
 La connexion du client n'utilise pas de relais implicite ou de compte payant.
