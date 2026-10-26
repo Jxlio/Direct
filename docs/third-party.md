@@ -7,7 +7,7 @@ license are preserved in include/third_party/ and copied into binary packages.
 The update verifier uses the already linked Mbed TLS implementation of standard
 ECDSA P-256 and SHA-256. No private publishing key is embedded in the application.
 
-Direct 0.6 embeds third-party notices inside the executable as well, accessible
+Murmur 0.6 embeds third-party notices inside the executable as well, accessible
 through Versions > Licences integrees, so an executable-only update carries its
 current notices. Source SVG rendering tools (Pillow and resvg-js) and the Python
 cryptography signing tool are development tools; they are not shipped or linked
@@ -64,3 +64,11 @@ is preserved in `src/windows/assets/lucide/LICENSE` and distributed as
 `licenses/Lucide-LICENSE.txt`. The original SVG sources are retained; build-time
 renderings in several sizes and colors are embedded as Windows icon resources.
 No icon font, JavaScript runtime or SVG renderer is shipped with the application.
+
+# Microsoft WebView2 SDK
+
+The Windows interface links the WebView2 loader from Microsoft.Web.WebView2
+1.0.4258.31. The SDK is fetched from NuGet with a pinned SHA-256 hash.
+Its LICENSE.txt and NOTICE.txt are copied to the binary package. The
+Evergreen WebView2 Runtime is supplied separately by Microsoft on the user's
+Windows installation; it is not bundled with Murmur.

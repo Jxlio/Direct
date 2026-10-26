@@ -3,57 +3,176 @@
 #include <wchar.h>
 #include <wctype.h>
 #include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <stdio.h>
 #include <dwmapi.h>
 #include <commctrl.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include "link.h"
-#include "connect.h"
+#include "datadir.h"
 #include "friends.h"
-#include "icons.h"
 #include "updates.h"
 #include "local_test.h"
 #include "settings.h"
 #include "signaling.h"
+#include "screen.h"
+#include "media.h"
+#include "identity_store.h"
+#include "service_link.h"
+#include "web_ui.h"
 #ifdef _MSC_VER
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
 
 /* UI state belongs to the main thread. No idle render loop.
    Network/audio transport runs on a separate owning thread. */
-#define ID_INPUT 101
-#define ID_SEND 102
 #define ID_VOICE 103
-#define ID_SCREEN 104
 #define ID_MUTE 106
+#define ID_TEST 109
+#define ID_ATTACH 110
 #define MAX_MESSAGES 128
 #define MAX_TEXT 2048
-typedef struct { WCHAR text[MAX_TEXT + 1]; int room, remote; WCHAR author[64]; SYSTEMTIME time; } Message;
+typedef struct { WCHAR text[MAX_TEXT + 1]; uint32_t uid; int room, remote; WCHAR author[64]; SYSTEMTIME time; uint32_t media_id; unsigned media_kind; int media_pending; } Message;
 static struct {
-    HWND input, send, voice, screen, mute, rooms[3], connection, invite, updates, test;
-    HFONT normal, title, caption_font, heading;
-    HBRUSH background, field;
+    HWND window;
     Message messages[MAX_MESSAGES];
     size_t count;
     int room;
     UINT dpi;
-    WNDPROC edit_proc;
-    int test_mode, test_greeted, test_failed;
+    int minimized, keepalive, unread;
+    int test_mode, test_greeted, test_failed, custom_frame, record_mode, record_started;
     ULONGLONG test_deadline;
+    ULONGLONG record_deadline;
+    WCHAR record_dir[MAX_PATH];
+    uint32_t sending_media_id, next_uid;
     uint8_t last_peer[32]; int have_peer;
+    WCHAR invite_code[512], network_notice[256], identity_text[24], identity_public[131], identity_enc[131];
 } app;
 static const WCHAR *peer_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client B" : L"Client A") : friends_peer_name()?friends_peer_name():L"Votre ami"; }
 static const WCHAR *self_name(void) { return app.test_mode ? (app.test_mode==1 ? L"Client A · vous" : L"Client B · vous") : L"Vous"; }
-static const WCHAR *rooms[] = { L"Messages", L"Organisation", L"Jeux" };
-static const WCHAR *descriptions[] = {
-    L"Vos échanges avec l’ami connecté.",
-    L"Vos rendez-vous et vos projets, dans une discussion séparée.",
-    L"Discutez de vos prochaines parties."
-};
-static const COLORREF bg = RGB(255, 255, 255), sidebar = RGB(245, 247, 251);
-static const COLORREF fg = RGB(24, 34, 52), muted = RGB(104, 116, 137);
-static const COLORREF accent = RGB(58, 103, 244);
-static const COLORREF field_color = RGB(242, 245, 250);
+static const WCHAR *connection_description(void);
+static const WCHAR *voice_description(void);
+static void write_record_voice(void) {
+    WCHAR path[MAX_PATH]; char report[160]; DWORD written;
+    HANDLE file;
+    if(!app.record_dir[0]) return;
+    swprintf_s(path,MAX_PATH,L"%ls\\%ls",app.record_dir,app.test_mode==1?L"sender-voice.txt":L"receiver-voice.txt");
+    file=CreateFileW(path,GENERIC_WRITE,FILE_SHARE_READ,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file==INVALID_HANDLE_VALUE) return;
+    {
+        int count=snprintf(report,sizeof(report),"voice_state=%d\nreceived_packets=%u\ndecoded_frames=%llu\n",
+            link_voice_state(),link_voice_received_packets(),(unsigned long long)link_voice_decoded_frames());
+        if(count>0) WriteFile(file,report,(DWORD)count,&written,NULL);
+    }
+    CloseHandle(file);
+}
+/* "Ouvrir le dossier" on the appearance card: the folder holding user.css, which is created with a
+   commented example the first time so there is something to start from. */
+static void open_theme_folder(HWND window) {
+    static const char example[] =
+        "/* Murmur: votre feuille de style personnelle. Elle s'applique par-dessus le theme choisi. */\r\n"
+        "/* Exemple : decommentez pour changer les couleurs de base.\r\n"
+        ":root {\r\n"
+        "  --bg-main: #1e2a22;\r\n"
+        "  --bg-side: #17211b;\r\n"
+        "  --accent: #7bd88f;\r\n"
+        "}\r\n"
+        "*/\r\n";
+    WCHAR folder[MAX_PATH], file[MAX_PATH]; HANDLE handle; DWORD written;
+    if (FAILED(murmur_local_appdata(folder)) || wcslen(folder) + 24 >= MAX_PATH) return;
+    wcscat_s(folder, MAX_PATH, L"\\Murmur"); CreateDirectoryW(folder, NULL);
+    swprintf_s(file, MAX_PATH, L"%ls\\user.css", folder);
+    handle = CreateFileW(file, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (handle != INVALID_HANDLE_VALUE) { WriteFile(handle, example, (DWORD)sizeof(example) - 1, &written, NULL); CloseHandle(handle); }
+    ShellExecuteW(window, L"open", folder, NULL, NULL, SW_SHOWNORMAL);
+}
+/* Unread messages: the title counts them and, when the window is not in front, the taskbar button
+   flashes. Only a number crosses over, never a word of any message. */
+static void show_unread(HWND window, int count) {
+    WCHAR title[96];
+    if (count < 0 || count > 999) count = count < 0 ? 0 : 999;
+    if (count > app.unread && GetForegroundWindow() != window) {
+        FLASHWINFO flash = {sizeof(flash), window, FLASHW_TRAY | FLASHW_TIMERNOFG, 0, 0};
+        FlashWindowEx(&flash);
+    }
+    app.unread = count;
+    if (app.test_mode) return;
+    if (count) swprintf_s(title, 96, L"(%d) Murmur — Messages et appels", count); else wcscpy_s(title, 96, L"Murmur — Messages et appels");
+    SetWindowTextW(window, title);
+}
+/* A minimized window needs no rendering. With no call in progress the page is suspended,
+   which frees most of its memory; a call (or an incoming one) wakes it again. */
+static void apply_background(void) {
+    /* A page that is connected to a server keeps listening, so messages and calls still arrive. */
+    int call = link_voice_requested() || (link_voice_remote() & 1) || app.keepalive;
+    web_ui_set_background(app.minimized, !call);
+}
+static void web_ui_sync(void) {
+    WebUiMessage messages[MAX_MESSAGES];
+    WebUiFriend friends[16];
+    WebUiAudio audio;
+    const direct_audio_web_state *native_audio;
+    WebUiState state;
+    char network_utf8[MURMUR_ICE_TOKEN]={0};
+    WCHAR network_token[MURMUR_ICE_TOKEN]={0};
+    WCHAR update_status[512]={0};
+    size_t i;
+    if (!web_ui_active()) return;
+    for (i = 0; i < app.count; ++i) {
+        messages[i].text = app.messages[i].text;
+        messages[i].uid = app.messages[i].uid;
+        messages[i].author = app.messages[i].author;
+        messages[i].room = app.messages[i].room;
+        messages[i].remote = app.messages[i].remote;
+        messages[i].hour = app.messages[i].time.wHour;
+        messages[i].minute = app.messages[i].time.wMinute;
+        messages[i].media_id = app.messages[i].media_id;
+        messages[i].media_kind = app.messages[i].media_kind;
+        messages[i].media_pending = app.messages[i].media_pending;
+        if(messages[i].media_id && !media_get(messages[i].media_id,NULL,NULL,NULL)) messages[i].media_id=0;
+    }
+    ZeroMemory(&state, sizeof(state));
+    ZeroMemory(&audio,sizeof(audio));
+    native_audio=settings_web_state();
+    audio.input_count=native_audio->input_count; audio.output_count=native_audio->output_count;
+    for(i=0;i<(size_t)audio.input_count;++i) audio.inputs[i]=native_audio->inputs[i];
+    for(i=0;i<(size_t)audio.output_count;++i) audio.outputs[i]=native_audio->outputs[i];
+    audio.input_choice=native_audio->input_choice; audio.output_choice=native_audio->output_choice;
+    audio.input_volume=native_audio->input_volume; audio.output_volume=native_audio->output_volume;
+    audio.preview_active=native_audio->preview_active; audio.preview_level=native_audio->preview_level;
+    audio.locked=native_audio->locked; audio.sandbox=native_audio->sandbox; audio.notice=native_audio->notice;
+    audio.echo=(int)native_audio->echo; audio.noise=(int)native_audio->noise; audio.agc=(int)native_audio->agc; audio.gate=(int)native_audio->gate; audio.cleanup_available=native_audio->cleanup_available;
+    state.audio=&audio;
+    state.friend_count=friends_web_count();
+    if(state.friend_count>16) state.friend_count=16;
+    for(i=0;i<state.friend_count;++i) { friends[i].name=friends_web_name((unsigned)i); friends[i].online=friends_web_online((unsigned)i); }
+    state.friends=friends; state.friends_notice=friends_web_notice();
+    state.internet_enabled=friends_web_internet_enabled();
+    state.invite_code=app.invite_code; state.network_notice=app.network_notice; state.identity=app.identity_text; state.identity_public=app.identity_public; state.identity_enc=app.identity_enc;
+    if(link_ice_mode() && link_ice_token(network_utf8,sizeof(network_utf8))>=0)
+        MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,network_utf8,-1,network_token,MURMUR_ICE_TOKEN);
+    state.network_token=network_token;
+    state.network_phase=link_ice_mode()?link_ice_phase():0;
+    state.network_error=link_error();
+    if(!app.test_mode) updates_web_snapshot(update_status,&state.update_available,&state.update_busy);
+    state.update_status=update_status;
+    state.peer = peer_name(); state.self = self_name();
+    state.connection = connection_description(); state.voice = voice_description();
+    state.messages = messages; state.message_count = app.count;
+    state.room = app.room; state.connected = link_state() == 2;
+    state.connecting = link_state() == 1; state.call_requested = link_voice_requested();
+    state.call_incoming = (link_voice_remote() & 1) != 0;
+    state.muted = link_voice_state() == 4;
+    state.screen_enabled = link_state() == 2 && link_ice_mode();
+    state.sharing = screen_sharing(); state.remote_screen = screen_remote();
+    state.test_mode = app.test_mode;
+    state.media_busy = app.sending_media_id!=0;
+    web_ui_update(&state);
+    SecureZeroMemory(network_utf8,sizeof(network_utf8)); SecureZeroMemory(network_token,sizeof(network_token));
+}
 static int px(int n) { return MulDiv(n, (int)app.dpi, 96); }
-static int content_right(int width) { return width; }
 static const WCHAR *connection_description(void) {
     static WCHAR simulated[256];
     if (app.test_mode) {
@@ -87,102 +206,10 @@ static const WCHAR *voice_description(void) {
     if (!link_voice_requested() && (link_voice_remote()&1)) return L"Appel entrant · répondez ci-dessous";
     return states[link_voice_state()];
 }
-static void box(HDC dc, int x, int y, int w, int h, COLORREF color) {
-    RECT r = { px(x), px(y), px(x + w), px(y + h) };
-    HBRUSH brush = CreateSolidBrush(color);
-    FillRect(dc, &r, brush);
-    DeleteObject(brush);
-}
-static void rounded(HDC dc, int x, int y, int w, int h, int radius, COLORREF color) {
-    HBRUSH brush = CreateSolidBrush(color);
-    HGDIOBJ oldbrush = SelectObject(dc, brush);
-    HGDIOBJ oldpen = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(dc, px(x), px(y), px(x + w), px(y + h), px(radius), px(radius));
-    SelectObject(dc, oldpen);
-    SelectObject(dc, oldbrush);
-    DeleteObject(brush);
-}
-static void glass(HDC dc, int x, int y, int w, int h, int radius, BYTE opacity) {
-    HDC layer = CreateCompatibleDC(dc); HBITMAP bitmap = CreateCompatibleBitmap(dc, px(w), px(h));
-    HGDIOBJ old = SelectObject(layer, bitmap); RECT fill = {0, 0, px(w), px(h)};
-    HRGN clip = CreateRoundRectRgn(px(x), px(y), px(x+w+1), px(y+h+1), px(radius), px(radius));
-    BLENDFUNCTION blend = {AC_SRC_OVER, 0, opacity, 0}; int saved = SaveDC(dc);
-    FillRect(layer, &fill, (HBRUSH)GetStockObject(WHITE_BRUSH)); SelectClipRgn(dc, clip);
-    AlphaBlend(dc, px(x), px(y), px(w), px(h), layer, 0, 0, px(w), px(h), blend);
-    RestoreDC(dc, saved); DeleteObject(clip); SelectObject(layer, old); DeleteObject(bitmap); DeleteDC(layer);
-    {
-        HPEN edge = CreatePen(PS_SOLID, 1, RGB(224, 232, 248));
-        HGDIOBJ previous = SelectObject(dc, edge), brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-        RoundRect(dc, px(x), px(y), px(x+w), px(y+h), px(radius), px(radius));
-        SelectObject(dc, brush); SelectObject(dc, previous); DeleteObject(edge);
-    }
-}
-static void label(HDC dc, HFONT font, COLORREF color, int x, int y,
-                  int w, int h, const WCHAR *text, UINT flags) {
-    RECT r = { px(x), px(y), px(x + w), px(y + h) };
-    HGDIOBJ old = SelectObject(dc, font);
-    SetTextColor(dc, color);
-    SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, text, -1, &r, flags | DT_NOPREFIX);
-    SelectObject(dc, old);
-}
-static void icon(HDC dc, int x, int y, int size, enum direct_icon kind, COLORREF color) {
-    direct_icon_draw(dc, app.dpi, kind, color, x, y, size);
-}
-static void fonts(void) {
-    int i;
-    if (app.normal) DeleteObject(app.normal);
-    if (app.title) DeleteObject(app.title);
-    if (app.caption_font) DeleteObject(app.caption_font);
-    if (app.heading) DeleteObject(app.heading);
-    direct_icons_clear();
-    app.heading = CreateFontW(-px(16), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0,
-        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    app.normal = CreateFontW(-px(14), 0, 0, 0, FW_NORMAL, 0, 0, 0,
-        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    app.title = CreateFontW(-px(34), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0,
-        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    app.caption_font = CreateFontW(-px(12), 0, 0, 0, FW_NORMAL, 0, 0, 0,
-        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    if (app.input) {
-        SendMessageW(app.input, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        SendMessageW(app.send, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        SendMessageW(app.voice, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        SendMessageW(app.screen, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        SendMessageW(app.connection, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        SendMessageW(app.mute, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        for (i = 0; i < 3; ++i) SendMessageW(app.rooms[i], WM_SETFONT, (WPARAM)app.normal, TRUE);
-    }
-}
-static void layout(HWND window) {
-    RECT r;
-    int w, h, right, i;
-    GetClientRect(window, &r);
-    w = MulDiv(r.right, 96, (int)app.dpi);
-    h = MulDiv(r.bottom, 96, (int)app.dpi);
-    right = content_right(w);
-    MoveWindow(app.input, px(300), px(h - 82), px(right - 448), px(26), TRUE);
-    MoveWindow(app.send, px(right - 126), px(h - 91), px(90), px(42), TRUE);
-    MoveWindow(app.voice, px(28), px(468), px(140), px(38), TRUE);
-    MoveWindow(app.mute, px(176), px(468), px(48), px(38), TRUE);
-    MoveWindow(app.screen, px(right - 216), px(20), px(188), px(34), TRUE);
-    MoveWindow(app.updates, px(right - 344), px(20), px(116), px(34), TRUE);
-    MoveWindow(app.connection, px(16), px(100), px(220), px(42), TRUE);
-    ShowWindow(app.test, SW_HIDE);
-    MoveWindow(app.invite, px(300), px(h / 2 + 100), px(244), px(46), TRUE);
-    {
-        int any = app.count != 0;
-        ShowWindow(app.invite, !any && link_state() != 2 ? SW_SHOWNA : SW_HIDE);
-    }
-    MoveWindow(app.rooms[0],px(20),px(208),px(212),px(64),TRUE);
-    ShowWindow(app.rooms[0],link_state()==2 || app.count ? SW_SHOWNA:SW_HIDE);
-    for (i=1;i<3;++i) ShowWindow(app.rooms[i],SW_HIDE);
-}
-static void send_local(HWND window) {
-    WCHAR text[MAX_TEXT + 1];
+static void send_text(HWND window, const WCHAR *text) {
     uint8_t utf8[MURMUR_CHAT_LIMIT];
     size_t i;
-    int length = GetWindowTextW(app.input, text, MAX_TEXT + 1);
+    int length = (int)wcsnlen(text, MAX_TEXT + 1);
     for (i = 0; i < (size_t)length && iswspace(text[i]); ++i) {}
     if (i == (size_t)length) return;
     length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, length,
@@ -198,223 +225,342 @@ static void send_local(HWND window) {
         memmove(app.messages, app.messages + 1, sizeof(Message) * (MAX_MESSAGES - 1));
         --app.count;
     }
-    wcscpy_s(app.messages[app.count].text, MAX_TEXT + 1, text);
+    ZeroMemory(&app.messages[app.count],sizeof(Message)); app.messages[app.count].uid=++app.next_uid;
+    wcsncpy_s(app.messages[app.count].text, MAX_TEXT + 1, text, (size_t)length);
     app.messages[app.count++].room = app.room;
     app.messages[app.count - 1].remote = 0;
     GetLocalTime(&app.messages[app.count-1].time);
     wcscpy_s(app.messages[app.count-1].author,64,app.messages[app.count-1].remote?peer_name():self_name());
-    SetWindowTextW(app.input, L"");
-    InvalidateRect(window, NULL, FALSE);
-    SetFocus(app.input);
+    web_ui_sync();
 }
-static LRESULT CALLBACK edit_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
-    if (message == WM_GETDLGCODE && lp && ((MSG *)lp)->wParam == VK_RETURN)
-        return DLGC_WANTALLKEYS;
-    if (message == WM_KEYDOWN && wp == VK_RETURN) {
-        send_local(GetParent(window));
-        return 0;
+static void append_media_message(HWND window,uint32_t id,unsigned kind,const WCHAR *label,int remote,int pending) {
+    Message *item;
+    if(app.count==MAX_MESSAGES) { memmove(app.messages,app.messages+1,sizeof(Message)*(MAX_MESSAGES-1)); --app.count; }
+    item=&app.messages[app.count++]; ZeroMemory(item,sizeof(*item)); item->uid=++app.next_uid;
+    wcsncpy_s(item->text,MAX_TEXT+1,label,_TRUNCATE);
+    item->room=0; item->remote=remote; item->media_id=id; item->media_kind=kind; item->media_pending=pending;
+    wcscpy_s(item->author,64,remote?peer_name():self_name());
+    GetLocalTime(&item->time);
+    InvalidateRect(window,NULL,FALSE); web_ui_sync();
+}
+static int web_utf8(const WCHAR *source,char *dest,int capacity) {
+    return source && WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,source,-1,dest,capacity,NULL,NULL)>0?0:-1;
+}
+static void web_network_action(const WCHAR *action,const WCHAR *text) {
+    WCHAR copy[13000],*fields[7],*cursor; int count,i,reply,result=-1;
+    murmur_ice_config config={0}; char token[MURMUR_ICE_TOKEN]={0}; unsigned long port;
+    if(!wcscmp(action,L"net-apply")) {
+        if(!web_utf8(text,token,sizeof(token))) result=link_ice_answer(token);
+        wcscpy_s(app.network_notice,256,result?L"Réponse invalide ou session expirée.":L"Réponse appliquée. Connexion en cours…");
+        SecureZeroMemory(token,sizeof(token)); web_ui_sync(); return;
     }
-    if (message == WM_CHAR && wp == VK_RETURN) return 0;
-    return CallWindowProcW(app.edit_proc, window, message, wp, lp);
+    reply=!wcscmp(action,L"net-reply"); count=reply?7:6;
+    if(!text || wcslen(text)>=sizeof(copy)/sizeof(copy[0])) return;
+    wcscpy_s(copy,13000,text); fields[0]=copy;
+    for(i=1;i<count;++i) { cursor=wcschr(fields[i-1],L'\n'); if(!cursor) goto done; *cursor=0; fields[i]=cursor+1; }
+    i=reply?1:0;
+    if(web_utf8(fields[i],config.stun_host,sizeof(config.stun_host)) ||
+       web_utf8(fields[i+2],config.turn_host,sizeof(config.turn_host)) ||
+       web_utf8(fields[i+4],config.username,sizeof(config.username)) ||
+       web_utf8(fields[i+5],config.password,sizeof(config.password))) goto done;
+    port=wcstoul(fields[i+1],NULL,10); if(!port || port>65535) goto done; config.stun_port=(uint16_t)port;
+    port=wcstoul(fields[i+3],NULL,10); if(!port || port>65535) goto done; config.turn_port=(uint16_t)port;
+    if(reply && web_utf8(fields[0],token,sizeof(token))) goto done;
+    if(!link_busy()) result=link_ice_start(!reply,&config,reply?token:NULL);
+done:
+    wcscpy_s(app.network_notice,256,result?L"Connexion impossible. Vérifiez le code et les paramètres réseau.":L"Invitation créée. Attendez le code à partager ci-dessous.");
+    SecureZeroMemory(copy,sizeof(copy)); SecureZeroMemory(token,sizeof(token)); SecureZeroMemory(&config,sizeof(config));
+    web_ui_sync();
 }
-static WNDPROC base_button;
-static LRESULT CALLBACK button_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
-    if (message == WM_MOUSEMOVE && !GetPropW(window, L"hover")) {
-        TRACKMOUSEEVENT track = {sizeof(track), TME_LEAVE, window, 0};
-        SetPropW(window, L"hover", (HANDLE)1); TrackMouseEvent(&track); InvalidateRect(window, NULL, FALSE);
+/* The only kinds of text the page may have signed: each starts with its protocol domain, so a signature
+   made for one purpose can never be mistaken for another, and arbitrary text is never signed. */
+static int signable_domain(const char *message) {
+    static const char *const domains[] = { "murmur/v2/auth|", "murmur/v2/envelope|", "murmur/v2/enc|", "murmur/v2/name|",
+        "murmur/v2/role|", "murmur/v2/owner|", "murmur/v2/voice|" };
+    size_t i;
+    for (i = 0; i < sizeof(domains) / sizeof(domains[0]); ++i) if (!strncmp(message, domains[i], strlen(domains[i]))) return 1;
+    return 0;
+}
+/* The page asks for signatures but never sees the key. Only the two protocol domains are signed,
+   so a script cannot make the user's identity sign arbitrary data. */
+static void web_identity_sign(const WCHAR *text) {
+    static const char digits[] = "0123456789abcdef";
+    const WCHAR *bar = text ? wcschr(text, L'|') : NULL;
+    char id[17] = {0}, message[24100]; uint8_t signature[MURMUR_ID_SIGNATURE]; char hex[MURMUR_ID_SIGNATURE * 2 + 1];
+    size_t i, id_length;
+    int length;
+    if (!bar || (id_length = (size_t)(bar - text)) == 0 || id_length > 16) return;
+    for (i = 0; i < id_length; ++i) { if (text[i] > 127 || !isalnum((unsigned char)text[i])) return; id[i] = (char)text[i]; }
+    length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, bar + 1, -1, message, sizeof(message), NULL, NULL);
+    if (length <= 1 || !signable_domain(message) ||
+        identity_store_sign((const uint8_t *)message, (size_t)length - 1, signature)) { web_ui_signature(id, NULL); return; }
+    for (i = 0; i < sizeof(signature); ++i) { hex[i * 2] = digits[signature[i] >> 4]; hex[i * 2 + 1] = digits[signature[i] & 15]; }
+    hex[sizeof(hex) - 1] = 0;
+    web_ui_signature(id, hex);
+}
+/* Key agreement for the group key: "id|peer encryption key (hex)". The page turns the secret into
+   keys with HKDF; the identity itself never leaves this module. */
+static void web_identity_ecdh(const WCHAR *text) {
+    static const char digits[] = "0123456789abcdef";
+    const WCHAR *bar = text ? wcschr(text, L'|') : NULL;
+    char id[17] = {0}; uint8_t peer[MURMUR_ID_PUBLIC], shared[32]; char hex[65];
+    size_t i, id_length;
+    if (!bar || (id_length = (size_t)(bar - text)) == 0 || id_length > 16 || wcslen(bar + 1) != MURMUR_ID_PUBLIC * 2) return;
+    for (i = 0; i < id_length; ++i) { if (text[i] > 127 || !isalnum((unsigned char)text[i])) return; id[i] = (char)text[i]; }
+    for (i = 0; i < MURMUR_ID_PUBLIC; ++i) {
+        WCHAR high = bar[1 + i * 2], low = bar[2 + i * 2]; int a, b;
+        a = high >= L'0' && high <= L'9' ? high - L'0' : high >= L'a' && high <= L'f' ? high - L'a' + 10 : -1;
+        b = low >= L'0' && low <= L'9' ? low - L'0' : low >= L'a' && low <= L'f' ? low - L'a' + 10 : -1;
+        if (a < 0 || b < 0) { web_ui_ecdh(id, NULL); return; }
+        peer[i] = (uint8_t)(a << 4 | b);
     }
-    if (message == WM_MOUSELEAVE || message == WM_NCDESTROY) {
-        RemovePropW(window, L"hover"); InvalidateRect(window, NULL, FALSE);
-    }
-    return CallWindowProcW(base_button, window, message, wp, lp);
+    if (identity_store_ecdh(peer, shared)) { web_ui_ecdh(id, NULL); return; }
+    for (i = 0; i < 32; ++i) { hex[i * 2] = digits[shared[i] >> 4]; hex[i * 2 + 1] = digits[shared[i] & 15]; }
+    hex[64] = 0;
+    web_ui_ecdh(id, hex);
+    SecureZeroMemory(shared, sizeof(shared)); SecureZeroMemory(hex, sizeof(hex));
 }
-static void enhance_button(HWND button) {
-    if (!base_button) base_button = (WNDPROC)GetWindowLongPtrW(button, GWLP_WNDPROC);
-    SetWindowLongPtrW(button, GWLP_WNDPROC, (LONG_PTR)button_proc);
-}
-static void paint(HWND window, HDC dc) {
-    RECT r; int w, h, i, y, matching = 0;
-    GetClientRect(window, &r);
-    w = MulDiv(r.right, 96, (int)app.dpi); h = MulDiv(r.bottom, 96, (int)app.dpi);
+/* "slot|origin|guild" opens a server connection; "slot|frame" sends; "slot" closes. */
+static void web_service_action(const WCHAR *action, const WCHAR *text) {
+    static char utf8[74100]; int slot, length;
+    if (!text || !text[0] || text[0] < L'0' || text[0] >= L'0' + SERVICE_SLOTS) return;
+    slot = text[0] - L'0';
+    if (!wcscmp(action, L"service-close")) { service_link_close(slot); return; }
+    if (text[1] != L'|') return;
+    length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text + 2, -1, utf8, sizeof(utf8), NULL, NULL);
+    if (length <= 1) return;
+    if (!wcscmp(action, L"service-send")) { service_link_send(slot, utf8, (size_t)length - 1); return; }
     {
-        TRIVERTEX stops[2] = {{0, 0, 0xeb00, 0xf000, 0xff00, 0},
-            {r.right, r.bottom, 0xf800, 0xfb00, 0xff00, 0}};
-        GRADIENT_RECT gradient = {0, 1}; GradientFill(dc, stops, 2, &gradient, 1, GRADIENT_FILL_RECT_H);
+        char *split = strchr(utf8, '|');
+        if (!split) { web_ui_service_event(slot, "close", 1008, NULL); return; }
+        *split = 0;
+        if (service_link_open(slot, utf8, split + 1)) web_ui_service_event(slot, "close", 1008, NULL);
     }
-    glass(dc, 12, 12, 228, h-24, 24, 145);
-    glass(dc, 264, 12, w-276, 64, 20, 180);
-    box(dc, 251, 0, 1, h, RGB(229, 234, 242));
-    /* A small brand mark, rather than an unused server rail. */
-    rounded(dc, 24, 24, 34, 34, 12, accent);
-    icon(dc, 32, 32, 18, ICON_MESSAGE, RGB(255, 255, 255));
-    label(dc, app.heading, fg, 70, 22, 148, 24, L"Direct", DT_SINGLELINE);
-    label(dc, app.caption_font, muted, 70, 47, 148, 20, L"Messages et appels", DT_SINGLELINE);
-    label(dc,app.caption_font,muted,30,80,190,18,L"AMIS",DT_SINGLELINE);
-    label(dc,app.caption_font,muted,30,176,190,20,L"CONVERSATIONS",DT_SINGLELINE);
-    if(link_state()!=2 && !app.count) label(dc,app.caption_font,muted,30,218,180,52,L"Connectez un ami pour\ncommencer à discuter.",DT_WORDBREAK);
-    box(dc,28,308,196,1,RGB(229,234,242));
-    glass(dc,24,330,204,190,18,170);
-    label(dc,app.caption_font,accent,38,344,178,20,app.test_mode?L"APPEL · AUDIO SIMULÉ":L"APPEL VOCAL",DT_SINGLELINE);
-    label(dc,app.caption_font,fg,38,370,178,36,voice_description(),DT_WORDBREAK);
-    if(link_voice_requested() || (link_voice_remote()&1)) {
-        WCHAR participant[100];
-        swprintf_s(participant,100,L"%ls · %ls",peer_name(),(link_voice_remote()&1)?((link_voice_remote()&2)?L"micro coupé":link_voice_requested()?L"a rejoint":L"vous appelle"):L"en attente");
-        label(dc,app.caption_font,(link_voice_remote()&1)?RGB(36,114,83):muted,38,406,178,20,participant,DT_SINGLELINE|DT_END_ELLIPSIS);
-        if(link_voice_requested()) label(dc,app.caption_font,link_voice_state()==4?muted:RGB(36,114,83),38,430,178,20,link_voice_state()==4?L"Vous · micro coupé":app.test_mode?L"Vous · audio simulé":L"Vous · micro activé",DT_SINGLELINE);
-    } else label(dc,app.caption_font,muted,38,406,178,20,L"Lancez un appel à deux",DT_SINGLELINE);
-    box(dc, 16, h-90, 220, 1, RGB(229, 234, 242));
-    rounded(dc, 24, h-67, 34, 34, 34, RGB(222, 232, 255));
-    label(dc, app.caption_font, accent, 24, h-67, 34, 34, L"V", DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    label(dc, app.normal, fg, 70, h-72, 148, 24, self_name(), DT_SINGLELINE);
-    label(dc, app.caption_font, muted, 70, h-47, 148, 20,
-        link_state() == 2 ? L"Connecté à votre ami" : link_state() == 1 ? L"Connexion en cours…" : link_state() == 3 ? L"Échec de connexion" : L"Sur cet appareil", DT_SINGLELINE);
-    icon(dc, 281, 27, 20, ICON_MESSAGE, muted);
-    label(dc, app.heading, fg, 310, 24, w-660, 26, link_state()==2 || app.count ? peer_name() : L"Conversations", DT_SINGLELINE | DT_END_ELLIPSIS);
-    box(dc, 252, 75, w-252, 1, RGB(234, 238, 245));
-    label(dc, app.caption_font, muted, 284, 94, w-320, 24, link_state()==2 ? L"● En ligne · messages privés" : descriptions[app.room], DT_SINGLELINE | DT_END_ELLIPSIS);
-    label(dc, app.caption_font, link_state() == 3 ? accent : muted, 284, 119, w-320, 20,
-        connection_description(), DT_SINGLELINE | DT_END_ELLIPSIS);
-    if(link_voice_requested() || (link_voice_remote()&1)) {
-        WCHAR call[160];
-        glass(dc,284,150,w-320,66,16,210);
-        swprintf_s(call,160,L"%ls · %ls",peer_name(),!link_voice_requested()?L"vous appelle":link_voice_state()==1?L"en attente de réponse":L"appel en cours");
-        label(dc,app.heading,accent,302,160,w-360,24,call,DT_SINGLELINE|DT_END_ELLIPSIS);
-        label(dc,app.caption_font,muted,302,188,w-360,20,app.test_mode?L"Test silencieux : aucun micro ni haut-parleur ouvert.":!link_voice_requested()?L"Cliquez Répondre dans le panneau d’appel.":link_voice_state()==4?L"Votre microphone est coupé.":(link_voice_remote()&2)?L"Votre ami a coupé son microphone.":L"Les commandes d’appel sont dans le panneau de gauche.",DT_SINGLELINE|DT_END_ELLIPSIS);
+}
+static void web_ui_action(const wchar_t *action, const wchar_t *text) {
+    HWND window = app.window;
+    int id = 0;
+    if (!wcscmp(action, L"ready")) {
+        if (!app.custom_frame) {
+            app.custom_frame = 1;
+            SetWindowPos(window, NULL, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        web_ui_resize(window); web_ui_sync(); return;
     }
-    for (i = 0; i < (int)app.count; ++i) ++matching;
-    if (!matching) {
-        int top = h/2-138;
-        glass(dc, 280, top-20, w-308, 328, 24, 125);
-        rounded(dc, 300, top, 52, 52, 18, RGB(233, 239, 255));
-        icon(dc, 312, top+12, 28, ICON_MESSAGE, accent);
-        label(dc, app.caption_font, accent, 300, top+78, w-350, 22, L"MESSAGES PRIVÉS · APPELS VOCAUX", DT_SINGLELINE);
-        label(dc, app.title, fg, 298, top+105, w-346, 52, L"Parlez avec vos amis.", DT_SINGLELINE | DT_END_ELLIPSIS);
-        label(dc, app.normal, muted, 300, top+164, w-360, 46,
-            link_state() == 2 ? L"Votre ami est connecté. Envoyez votre premier message\nou démarrez un appel vocal." :
-            L"Ajoutez un ami, connectez-vous et commencez à discuter.\nVos échanges sont chiffrés de bout en bout.", DT_WORDBREAK);
+    if (!wcscmp(action, L"window-minimize")) { ShowWindow(window, SW_MINIMIZE); return; }
+    if (!wcscmp(action, L"window-maximize")) { ShowWindow(window, IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE); return; }
+    if (!wcscmp(action, L"window-close")) { PostMessageW(window, WM_CLOSE, 0, 0); return; }
+    if (!wcscmp(action, L"window-drag")) {
+        ReleaseCapture();
+        SendMessageW(window, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        return;
     }
-    y = h-138;
-    for (i = (int)app.count-1; i >= 0; --i) {
-        Message *m=&app.messages[i]; int bubble_width=(w-340)*3/4,x,th,row;
-        WCHAR author[120]; RECT measure={0,0,px(bubble_width-32),0}; HGDIOBJ old;
-
-        old=SelectObject(dc,app.normal);
-        DrawTextW(dc,m->text,-1,&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_EDITCONTROL);
-        SelectObject(dc,old); th=MulDiv(measure.bottom,96,(int)app.dpi)+4; row=th+72;
-        if(y-row<(link_voice_requested() || (link_voice_remote()&1)?230:148)) break;
-        y-=row; x=m->remote?330:w-38-bubble_width;
-        rounded(dc,x,y+24,bubble_width,th+24,16,m->remote?RGB(255,255,255):RGB(222,232,255));
-        rounded(dc,m->remote?284:x-44,y+26,32,32,32,m->remote?RGB(235,220,255):accent);
-        label(dc,app.caption_font,m->remote?RGB(123,69,184):RGB(255,255,255),m->remote?284:x-44,y+26,32,32,m->remote?(app.test_mode==1?L"B":L"A"):L"V",DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-        if(m->room>0 && m->room<3) swprintf_s(author,120,L"%ls · %ls · %02u:%02u",m->author,rooms[m->room],m->time.wHour,m->time.wMinute);
-        else swprintf_s(author,120,L"%ls   ·   %02u:%02u",m->author,m->time.wHour,m->time.wMinute);
-        label(dc,app.caption_font,m->remote?RGB(123,69,184):accent,x,y,bubble_width,20,author,DT_SINGLELINE);
-        { int saved=SaveDC(dc); IntersectClipRect(dc,px(x+16),px(y+36),px(x+bubble_width-16),px(y+36+th));
-          label(dc,app.normal,fg,x+16,y+36,bubble_width-32,th,m->text,DT_WORDBREAK|DT_EDITCONTROL); RestoreDC(dc,saved); }
+    if (!wcscmp(action, L"send")) {
+        if (text && wcslen(text) <= MAX_TEXT) send_text(window, text);
+        return;
     }
-    glass(dc, 280, h-108, w-308, 72, 18, 210);
-    rounded(dc, 294, h-91, w-432, 40, 12, field_color);
-    label(dc, app.caption_font, muted, 294, h-27, w-330, 20,
-        link_state() == 2 ? L"Entrée pour envoyer   ·   Conversation chiffrée" : L"Vos messages restent entre vous. Connectez un ami pour commencer.", DT_SINGLELINE | DT_END_ELLIPSIS);
+    if (!wcscmp(action,L"attach")) { SendMessageW(window,WM_COMMAND,MAKEWPARAM(ID_ATTACH,BN_CLICKED),0); return; }
+    if (!wcscmp(action,L"screen-signal") && text && link_state()==2 && link_voice_requested()) {
+        size_t length=wcslen(text); uint8_t packet[MURMUR_CHAT_LIMIT];
+        int written;
+        if(!length || length>MURMUR_CHAT_LIMIT-4) return;
+        packet[0]=0; packet[1]='W'; packet[2]='R'; packet[3]='1';
+        written=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,text,(int)length,
+            (char *)packet+4,MURMUR_CHAT_LIMIT-4,NULL,NULL);
+        if(written>0) link_send(2,packet,(size_t)written+4);
+        SecureZeroMemory(packet,sizeof(packet));
+        return;
+    }
+    if (!wcscmp(action,L"open-url") && text && wcslen(text)<=2048 &&
+        (!_wcsnicmp(text,L"https://",8) || !_wcsnicmp(text,L"http://",7))) {
+        const WCHAR *p=text;
+        while(*p && *p>=32 && *p!=127) ++p;
+        if(!*p) ShellExecuteW(window,L"open",text,NULL,NULL,SW_SHOWNORMAL);
+        return;
+    }
+    if (!wcscmp(action,L"webview-unavailable")) {
+        MessageBoxW(window,L"Murmur a besoin du composant Microsoft Edge WebView2 pour afficher son interface.\n"
+            L"Installez-le depuis microsoft.com/edge/webview2 puis relancez Murmur.",L"Murmur",MB_OK|MB_ICONWARNING);
+        PostMessageW(window,WM_CLOSE,0,0); return;
+    }
+    if (!wcscmp(action,L"unread")) { show_unread(window, text ? (int)wcstol(text, NULL, 10) : 0); return; }
+    if (!wcscmp(action,L"keepalive")) { app.keepalive = text && text[0] == L'1'; if (app.minimized) apply_background(); return; }
+    if (!wcscmp(action,L"theme-open")) { open_theme_folder(window); return; }
+    if (!wcscmp(action,L"identity-sign")) { web_identity_sign(text); return; }
+    if (!wcscmp(action,L"identity-ecdh")) { web_identity_ecdh(text); return; }
+    if (!wcscmp(action,L"service-open") || !wcscmp(action,L"service-send") || !wcscmp(action,L"service-close")) { web_service_action(action,text); return; }
+    if (!wcscmp(action,L"friends")) { web_ui_sync(); return; }
+    if (!wcscmp(action,L"settings") || !wcscmp(action,L"audio-enumerate")) { settings_web_enumerate(); web_ui_sync(); return; }
+    if (!wcscmp(action,L"friend-create")) {
+        app.invite_code[0]=0; friends_web_create(text,app.invite_code); web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"friend-add")) {
+        const WCHAR *split=wcschr(text,L'\n');
+        if(split && split-text<64) { WCHAR name[64]; wcsncpy_s(name,64,text,(size_t)(split-text)); friends_web_add(name,split+1); SecureZeroMemory(name,sizeof(name)); }
+        web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"friend-code") || !wcscmp(action,L"friend-connect") || !wcscmp(action,L"friend-forget")) {
+        unsigned index=(unsigned)wcstoul(text,NULL,10);
+        if(!wcscmp(action,L"friend-code")) { app.invite_code[0]=0; friends_web_code(index,app.invite_code); }
+        if(!wcscmp(action,L"friend-connect")) friends_web_connect(index);
+        if(!wcscmp(action,L"friend-forget")) { friends_web_forget(index); app.invite_code[0]=0; }
+        web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"friend-disconnect")) { friends_web_disconnect(); web_ui_sync(); return; }
+    if (!wcscmp(action,L"audio-input") || !wcscmp(action,L"audio-output")) {
+        settings_web_select(!wcscmp(action,L"audio-input"),(int)wcstol(text,NULL,10)); web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"audio-in-volume") || !wcscmp(action,L"audio-out-volume")) {
+        settings_web_volume(!wcscmp(action,L"audio-in-volume"),(unsigned)wcstoul(text,NULL,10)); web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"audio-cleanup")) {
+        unsigned v[4]={0,0,0,0}; int i=0; const WCHAR *p=text;
+        while(p && *p && i<4) { v[i++]=(unsigned)wcstoul(p,(WCHAR **)&p,10); if(*p==L'|') ++p; else break; }
+        if(i==4) settings_web_cleanup(v[0],v[1],v[2],v[3]);
+        web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"audio-preview-in") || !wcscmp(action,L"audio-preview-out")) {
+        settings_web_preview(window,!wcscmp(action,L"audio-preview-in")); web_ui_sync(); return;
+    }
+    if (!wcscmp(action,L"net-invite") || !wcscmp(action,L"net-reply") || !wcscmp(action,L"net-apply")) {
+        web_network_action(action,text); return;
+    }
+    if (!wcscmp(action,L"net-disconnect")) { link_stop(); wcscpy_s(app.network_notice,256,L"Connexion arrêtée."); web_ui_sync(); return; }
+    if (!wcscmp(action,L"update-check") && !app.test_mode) { updates_web_check(); web_ui_sync(); return; }
+    if (!wcscmp(action,L"update-download") && !app.test_mode) { updates_web_download(); web_ui_sync(); return; }
+    if (!wcscmp(action, L"voice")) id = ID_VOICE;
+    else if (!wcscmp(action, L"mute")) id = ID_MUTE;
+    else if (!wcscmp(action, L"test")) id = ID_TEST;
+    if (id) SendMessageW(window, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), 0);
 }
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     switch (message) {
+    case WM_NCCALCSIZE:
+        if (app.custom_frame && wp) {
+            NCCALCSIZE_PARAMS *params = (NCCALCSIZE_PARAMS *)lp;
+            if (IsZoomed(window)) {
+                MONITORINFO monitor = {sizeof(monitor)};
+                if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor))
+                    params->rgrc[0] = monitor.rcWork;
+            }
+            return 0;
+        }
+        return DefWindowProcW(window, message, wp, lp);
+    case WM_NCHITTEST:
+        if (app.custom_frame && !IsZoomed(window)) {
+            RECT bounds;
+            int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+            int edge = GetSystemMetricsForDpi(SM_CXSIZEFRAME, app.dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, app.dpi);
+            int left, right, top, bottom;
+            GetWindowRect(window, &bounds);
+            left = x < bounds.left + edge; right = x >= bounds.right - edge;
+            top = y < bounds.top + edge; bottom = y >= bounds.bottom - edge;
+            if (top && left) return HTTOPLEFT;
+            if (top && right) return HTTOPRIGHT;
+            if (bottom && left) return HTBOTTOMLEFT;
+            if (bottom && right) return HTBOTTOMRIGHT;
+            if (left) return HTLEFT;
+            if (right) return HTRIGHT;
+            if (top) return HTTOP;
+            if (bottom) return HTBOTTOM;
+        }
+        return DefWindowProcW(window, message, wp, lp);
     case WM_CREATE:
+        screen_init(window);
+        screen_test_mode(app.test_mode!=0);
         link_init(window);
         settings_init(app.test_mode);
         if (app.test_mode) friends_init_test(window,peer_name());
         else { friends_init(window); updates_init(window); }
-        app.dpi = GetDpiForWindow(window);
-        app.background = CreateSolidBrush(bg);
-        app.field = CreateSolidBrush(field_color);
-        app.input = CreateWindowExW(0, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)ID_INPUT, NULL, NULL);
-        app.send = CreateWindowW(L"BUTTON", L"Envoyer", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)ID_SEND, NULL, NULL);
-        app.voice = CreateWindowW(L"BUTTON", L"Appeler", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)ID_VOICE, NULL, NULL);
-        app.screen = CreateWindowW(L"BUTTON", L"Partage d’écran · bientôt", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)ID_SCREEN, NULL, NULL);
-        app.mute = CreateWindowW(L"BUTTON", L"Couper le microphone", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)ID_MUTE, NULL, NULL);
-        EnableWindow(app.mute, FALSE);
-        EnableWindow(app.screen, FALSE);
-        EnableWindow(app.voice, FALSE);
-        EnableWindow(app.send, FALSE);
-        app.connection = CreateWindowW(L"BUTTON", L"Amis · ajouter et gérer", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)105, NULL, NULL);
-        app.updates = CreateWindowW(L"BUTTON", L"Paramètres", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)108, NULL, NULL);
-        app.test = CreateWindowW(L"BUTTON", app.test_mode ? L"Test local · 2 clients" : L"Test solo · ouvrir 2 clients", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)109, NULL, NULL);
-        EnableWindow(app.updates,TRUE); EnableWindow(app.test,!app.test_mode);
-        SendMessageW(app.connection, WM_SETFONT, (WPARAM)app.normal, TRUE);
-        app.invite = CreateWindowW(L"BUTTON", L"Ajouter ou connecter un ami  →", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-            0, 0, 0, 0, window, (HMENU)(INT_PTR)107, NULL, NULL);
-        {
-            int i;
-            for (i = 0; i < 3; ++i) {
-                WCHAR name[80];
-                swprintf_s(name, 80, L"%ls", rooms[i]);
-                app.rooms[i] = CreateWindowW(L"BUTTON", name,
-                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                    0, 0, 0, 0, window, (HMENU)(INT_PTR)(200 + i), NULL, NULL);
-            }
+        app.window = window;
+        if (!app.test_mode && !identity_store_open_default()) {
+            /* Show the first 16 hex digits in groups of four: enough to compare by voice. */
+            const char *fingerprint = identity_store_fingerprint(); int i, n = 0;
+            for (i = 0; i < 16; ++i) { if (i && !(i & 3)) app.identity_text[n++] = L' '; app.identity_text[n++] = (WCHAR)fingerprint[i]; }
+            app.identity_text[n] = 0;
+            { const uint8_t *key = identity_store_public(); static const WCHAR digits[] = L"0123456789abcdef";
+              for (i = 0; i < (int)MURMUR_ID_PUBLIC; ++i) { app.identity_public[i * 2] = digits[key[i] >> 4]; app.identity_public[i * 2 + 1] = digits[key[i] & 15]; }
+              app.identity_public[MURMUR_ID_PUBLIC * 2] = 0;
+              key = identity_store_enc_public();
+              for (i = 0; i < (int)MURMUR_ID_PUBLIC; ++i) { app.identity_enc[i * 2] = digits[key[i] >> 4]; app.identity_enc[i * 2 + 1] = digits[key[i] & 15]; }
+              app.identity_enc[MURMUR_ID_PUBLIC * 2] = 0; }
         }
-        SendMessageW(app.input, EM_SETCUEBANNER, TRUE, (LPARAM)L"Écrire un message…");
-        SendMessageW(app.input, EM_SETLIMITTEXT, MAX_TEXT, 0);
-        app.edit_proc = (WNDPROC)SetWindowLongPtrW(app.input, GWLP_WNDPROC, (LONG_PTR)edit_proc);
-        fonts();
-        enhance_button(app.send); enhance_button(app.voice); enhance_button(app.mute);
-        enhance_button(app.screen); enhance_button(app.connection); enhance_button(app.invite);
-        enhance_button(app.updates);
-        enhance_button(app.test);
-        { int i; for (i = 0; i < 3; ++i) enhance_button(app.rooms[i]); }
-        layout(window);
+        app.dpi = GetDpiForWindow(window);
+        web_ui_set_media_provider(media_get);
+        service_link_init(window);
+        web_ui_init(window, web_ui_action);
         return 0;
     case WM_GETMINMAXINFO:
         ((MINMAXINFO *)lp)->ptMinTrackSize.x = px(820);
         ((MINMAXINFO *)lp)->ptMinTrackSize.y = px(760);
+        if (app.custom_frame) {
+            MONITORINFO monitor = {sizeof(monitor)};
+            if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
+                ((MINMAXINFO *)lp)->ptMaxPosition.x = monitor.rcWork.left - monitor.rcMonitor.left;
+                ((MINMAXINFO *)lp)->ptMaxPosition.y = monitor.rcWork.top - monitor.rcMonitor.top;
+                ((MINMAXINFO *)lp)->ptMaxSize.x = monitor.rcWork.right - monitor.rcWork.left;
+                ((MINMAXINFO *)lp)->ptMaxSize.y = monitor.rcWork.bottom - monitor.rcWork.top;
+            }
+        }
         return 0;
     case WM_DPICHANGED: {
         RECT *suggested = (RECT *)lp;
         app.dpi = HIWORD(wp);
-        fonts();
         SetWindowPos(window, NULL, suggested->left, suggested->top,
             suggested->right - suggested->left, suggested->bottom - suggested->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
-        layout(window);
-        InvalidateRect(window, NULL, FALSE);
+        web_ui_resize(window);
+        web_ui_sync();
         return 0;
     }
     case WM_SIZE:
-        layout(window);
-        InvalidateRect(window, NULL, FALSE);
+        if ((wp == SIZE_MINIMIZED) != (app.minimized != 0)) { app.minimized = wp == SIZE_MINIMIZED; apply_background(); }
+        web_ui_resize(window);
+        web_ui_sync();
         return 0;
     case WM_COMMAND:
+        if(LOWORD(wp)==ID_ATTACH && HIWORD(wp)==BN_CLICKED) {
+            WCHAR label[MAX_PATH]={0}; uint32_t id=0; unsigned kind=0;
+            int result=media_pick_and_send(window,&id,&kind,label,MAX_PATH);
+            if(result==1) {
+                app.sending_media_id=id;
+                append_media_message(window,id,kind,label,0,1);
+                SetTimer(window,908,20,NULL);
+            } else if(result<0) MessageBoxW(window,
+                result==-3?L"Image trop volumineuse. Choisissez un fichier de 2 Mo maximum.":
+                result==-4?L"Format ou dimensions non pris en charge. Utilisez JPEG, PNG ou GIF.":
+                result==-2?L"Connectez un ami et attendez la fin de l’envoi en cours.":
+                L"Impossible d’ouvrir cette image.",L"Murmur · Image",MB_OK|MB_ICONWARNING);
+        }
         if (LOWORD(wp) == ID_VOICE && HIWORD(wp) == BN_CLICKED && link_voice_toggle())
             MessageBoxW(window, L"Connectez d’abord un proche avec Mes amis.\n"
                 L"Vous devrez ensuite tous les deux rejoindre le vocal.", L"Vocal", MB_OK);
         if (LOWORD(wp) == ID_MUTE && HIWORD(wp) == BN_CLICKED) link_voice_mute_toggle();
-        if (LOWORD(wp) == 105 && HIWORD(wp) == BN_CLICKED) friends_show(window);
-        if (LOWORD(wp) == 107 && HIWORD(wp) == BN_CLICKED) friends_show(window);
-        if (LOWORD(wp) == 108 && HIWORD(wp) == BN_CLICKED) settings_show(window);
-        if (LOWORD(wp) == 109 && HIWORD(wp) == BN_CLICKED && local_test_launch(window))
-            MessageBoxW(window,L"Impossible d’ouvrir le test local.",L"Direct · Test solo",MB_OK|MB_ICONWARNING);
-        if (LOWORD(wp) >= 200 && LOWORD(wp) <= 202 && HIWORD(wp) == BN_CLICKED) {
-            int i;
-            app.room = LOWORD(wp) - 200;
-            layout(window);
-            for (i = 0; i < 3; ++i) InvalidateRect(app.rooms[i], NULL, FALSE);
-            InvalidateRect(window, NULL, FALSE);
-        }
-        if (LOWORD(wp) == ID_SEND && HIWORD(wp) == BN_CLICKED) send_local(window);
-        if (LOWORD(wp) == ID_SCREEN && HIWORD(wp) == BN_CLICKED)
-            MessageBoxW(window, L"Le partage d’écran reste à intégrer.\nAucun écran n’est capturé.",
-                L"Fonction en préparation", MB_OK | MB_ICONINFORMATION);
+        if (LOWORD(wp) == ID_TEST && HIWORD(wp) == BN_CLICKED && local_test_launch(window))
+            MessageBoxW(window,L"Impossible d’ouvrir le test local.",L"Murmur · Test solo",MB_OK|MB_ICONWARNING);
+        web_ui_sync();
         return 0;
     case WM_TIMER:
+        if(wp==908 && app.sending_media_id) {
+            int result=media_pump();
+            if(result) {
+                size_t i;
+                KillTimer(window,908);
+                for(i=0;i<app.count;++i) if(app.messages[i].media_id==app.sending_media_id) app.messages[i].media_pending=result<0?-1:0;
+                app.sending_media_id=0; web_ui_sync();
+            }
+            return 0;
+        }
+        if (wp==906 && app.record_mode && app.test_mode==2) {
+            screen_record_tick();
+            if (GetTickCount64()>=app.record_deadline) { write_record_voice(); screen_record_end(); KillTimer(window,906); }
+            return 0;
+        }
+        if (wp==907 && app.record_mode && app.test_mode==1) {
+            write_record_voice(); screen_record_end(); KillTimer(window,907); return 0;
+        }
+        if (wp==905) { settings_web_tick(); web_ui_sync(); return 0; }
         if (app.test_mode && wp==904) {
             local_test_tick();
             if (app.test_greeted && !link_voice_requested()) KillTimer(window,904);
@@ -422,10 +568,23 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
                 app.test_failed=1; local_test_close(); link_stop(); KillTimer(window,904);
             }
             InvalidateRect(window,NULL,FALSE);
+            web_ui_sync();
         }
         return 0;
-    case WM_DIRECT_SIGNAL: if(!app.test_mode) friends_internet_event(); return 0;
-    case WM_DIRECT_UPDATE: if (!app.test_mode) updates_refresh(); return 0;
+    case WM_APP+31:
+        web_ui_sync(); return 0;
+    case WM_MURMUR_LEVELS: { unsigned self = 0, peer = 0; link_voice_levels(&self, &peer); web_ui_levels((int)self, (int)peer); return 0; }
+    case WM_SERVICE_LINK: {
+        service_event event;
+        while (service_link_next(&event)) {
+            web_ui_service_event(event.slot, event.kind == SERVICE_EVENT_OPEN ? "open" : event.kind == SERVICE_EVENT_CLOSE ? "close" : "message", event.code, event.text);
+            free(event.text);
+        }
+        return 0;
+    }
+    case WM_DIRECT_SIGNAL: if(!app.test_mode) friends_internet_event(); web_ui_sync(); return 0;
+    case WM_APP+34: web_ui_sync(); return 0;
+    case WM_DIRECT_UPDATE: web_ui_sync(); return 0;
     case WM_MURMUR_LINK: {
         link_message incoming;
         uint8_t current_peer[32];
@@ -436,6 +595,22 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         while (link_receive(&incoming)) {
             WCHAR text[MAX_TEXT + 1];
             int length;
+            if(incoming.size>4 && incoming.text[0]==0 &&
+               !memcmp(incoming.text+1,"WR1",3)) {
+                if(web_ui_active() && link_voice_requested() && incoming.size-4<=MURMUR_CHAT_LIMIT-4) {
+                    WCHAR signal[MURMUR_CHAT_LIMIT];
+                    int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,
+                        (const char *)incoming.text+4,(int)incoming.size-4,signal,MURMUR_CHAT_LIMIT-1);
+                    if(count>0) { signal[count]=0; web_ui_screen_signal(signal); }
+                }
+                continue;
+            }
+            if(incoming.size && incoming.text[0]==0) {
+                uint32_t id=0; unsigned kind=0;
+                if(media_receive(&incoming,&id,&kind)==1)
+                    append_media_message(window,id,kind,kind==3?L"GIF animé":L"Image",1,0);
+                continue;
+            }
             if (memchr(incoming.text, 0, incoming.size)) continue;
             length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (char *)incoming.text,
                 (int)incoming.size, text, MAX_TEXT);
@@ -445,6 +620,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
                 memmove(app.messages, app.messages + 1, sizeof(Message) * (MAX_MESSAGES - 1));
                 --app.count;
             }
+            ZeroMemory(&app.messages[app.count],sizeof(Message)); app.messages[app.count].uid=++app.next_uid;
             wcscpy_s(app.messages[app.count].text, MAX_TEXT + 1, text);
             app.messages[app.count].room = (int)incoming.room;
             app.messages[app.count++].remote = 1;
@@ -454,104 +630,34 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM
         SecureZeroMemory(&incoming, sizeof(incoming));
         if (app.test_mode && link_state()==2 && !app.test_greeted) {
             app.test_greeted=1;
-            SetWindowTextW(app.input,app.test_mode==1 ? L"Bonjour depuis le client A. Ce message traverse la connexion chiffrée locale." : L"Bonjour depuis le client B. Vous pouvez écrire ici et tester l’appel simulé.");
-            send_local(window);
+            send_text(window,app.test_mode==1 ? L"Bonjour depuis le client A. Ce message traverse la connexion chiffrée locale." : L"Bonjour depuis le client B. Vous pouvez écrire ici et tester l’appel simulé.");
         }
-        SetWindowTextW(app.voice, link_voice_requested() ? (link_voice_state()==1?L"Annuler":L"Raccrocher") : (link_voice_remote()&1) ? L"Répondre" : app.test_mode ? L"Tester l’appel" : L"Appeler");
-        SetWindowTextW(app.mute, link_voice_state() == 4 ? L"Activer le microphone" : L"Couper le microphone");
-        EnableWindow(app.mute, link_voice_requested());
-        EnableWindow(app.voice, link_state() == 2);
-        EnableWindow(app.send, link_state() == 2);
+        if(app.record_mode && app.test_mode && link_state()==2 && !app.record_started) {
+            app.record_started=1;
+            link_voice_toggle();
+            if(screen_record_game_begin(app.record_dir,app.test_mode==1)) app.test_failed=1;
+            else {
+                app.record_deadline=GetTickCount64()+10000;
+                SetTimer(window,app.test_mode==1?907:906,app.test_mode==1?10000:100,NULL);
+            }
+        }
         if (app.test_mode && link_voice_requested()) SetTimer(window,904,500,NULL);
-        EnableWindow(app.test,!app.test_mode && !link_busy());
-        SetWindowTextW(app.connection,link_state()==2 ? L"Amis · 1 en ligne" : L"Amis · ajouter et gérer");
-        SetWindowTextW(app.rooms[0],peer_name());
-        settings_refresh();
-        layout(window);
-        connection_refresh();
-        connection_auto_refresh();
         friends_connection_refresh();
-        InvalidateRect(window, NULL, FALSE);
-        return 0;
-    }
-    case WM_CTLCOLOREDIT:
-        SetTextColor((HDC)wp, fg);
-        SetBkColor((HDC)wp, field_color);
-        return (LRESULT)app.field;
-    case WM_DRAWITEM: {
-        DRAWITEMSTRUCT *item = (DRAWITEMSTRUCT *)lp;
-        WCHAR text[80];
-        int width = MulDiv(item->rcItem.right, 96, (int)app.dpi);
-        int height = MulDiv(item->rcItem.bottom, 96, (int)app.dpi);
-        BOOL primary = item->CtlID == ID_SEND || item->CtlID == 107 || item->CtlID == ID_VOICE;
-        BOOL channel = item->CtlID >= 200 && item->CtlID <= 202;
-        BOOL selected = channel && (int)(item->CtlID - 200) == app.room;
-        BOOL hover = GetPropW(item->hwndItem, L"hover") && !(item->itemState & ODS_DISABLED);
-        COLORREF surface = item->CtlID == ID_SEND ? field_color : item->CtlID == 107 || item->CtlID == 108 || item->CtlID == ID_SCREEN ? bg :
-            item->CtlID == ID_VOICE || item->CtlID == ID_MUTE ? RGB(235, 240, 249) : sidebar;
-        COLORREF fill = primary ? accent : selected ? RGB(228, 236, 255) : surface;
-        if (hover) fill = primary ? RGB(79, 120, 255) : RGB(233, 238, 248);
-        if (item->itemState & ODS_SELECTED) fill = primary ? RGB(43, 83, 210) : RGB(221, 230, 247);
-        if (item->itemState & ODS_DISABLED) fill = item->CtlID == ID_SEND ? RGB(230, 234, 242) : surface;
-        if(item->CtlID==ID_VOICE && !(item->itemState&ODS_DISABLED) && link_voice_requested()) fill=(hover || (item->itemState&ODS_SELECTED))?RGB(190,53,76):RGB(217,66,91);
-        box(item->hDC, 0, 0, width, height, surface);
-        rounded(item->hDC, 0, 0, width, height, 12,
-            fill);
-        GetWindowTextW(item->hwndItem, text, 80);
-        if(item->CtlID==200) {
-            rounded(item->hDC,10,15,32,32,32,RGB(235,220,255));
-            label(item->hDC,app.normal,RGB(123,69,184),10,15,32,32,app.test_mode==1?L"B":L"A",DT_CENTER|DT_VCENTER|DT_SINGLELINE);
-            label(item->hDC,app.heading,fg,52,10,width-60,24,text,DT_SINGLELINE|DT_END_ELLIPSIS);
-            label(item->hDC,app.caption_font,link_state()==2?RGB(36,114,83):muted,52,36,width-60,20,link_state()==2?L"● En ligne":L"○ Hors ligne",DT_SINGLELINE);
-            if(item->itemState&ODS_FOCUS) { RECT focus=item->rcItem; InflateRect(&focus,-4,-4); DrawFocusRect(item->hDC,&focus); }
-            return TRUE;
-        }
-        if (selected) rounded(item->hDC, 0, 9, 3, height-18, 3, accent);
-        {
-            enum direct_icon kind = channel ? (item->CtlID == 201 ? ICON_CALENDAR : item->CtlID == 202 ? ICON_GAME : ICON_MESSAGE) :
-                item->CtlID == 105 || item->CtlID == 107 || item->CtlID == 109 ? ICON_USERS : item->CtlID == 108 ? ICON_SETTINGS : item->CtlID == ID_SEND ? ICON_SEND :
-                item->CtlID == ID_VOICE ? (link_voice_requested() ? ICON_HANGUP : ICON_PHONE) :
-                item->CtlID == ID_MUTE ? (link_voice_state() == 4 ? ICON_MIC_OFF : ICON_MIC) : ICON_MONITOR;
-            COLORREF color = (item->itemState & ODS_DISABLED) ? muted : primary ? RGB(255, 255, 255) : selected ? accent : fg;
-            icon(item->hDC, item->CtlID == ID_MUTE ? (width-18)/2 : channel ? 16 : 10, (height-18)/2, 18, kind, color);
-        }
-        if (item->CtlID != ID_MUTE) label(item->hDC, app.normal,
-            (item->itemState & ODS_DISABLED) ? muted : primary ? RGB(255, 255, 255) : selected ? accent : hover || item->CtlID == 105 ? fg : muted, channel ? 44 : item->CtlID == ID_MUTE ? 0 : 30, 0,
-            channel ? width - 48 : item->CtlID == ID_MUTE ? width : width-34, height, text,
-            (channel ? DT_LEFT : DT_CENTER) | DT_VCENTER | DT_SINGLELINE);
-        if (item->itemState & ODS_FOCUS) {
-            RECT focus = item->rcItem;
-            InflateRect(&focus, -px(4), -px(4));
-            DrawFocusRect(item->hDC, &focus);
-        }
-        return TRUE;
-    }
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC dc = BeginPaint(window, &ps);
-        RECT bounds; HDC buffer; HBITMAP bitmap; HGDIOBJ old;
-        GetClientRect(window, &bounds);
-        buffer = CreateCompatibleDC(dc); bitmap = CreateCompatibleBitmap(dc, bounds.right, bounds.bottom);
-        old = SelectObject(buffer, bitmap); paint(window, buffer);
-        BitBlt(dc, 0, 0, bounds.right, bounds.bottom, buffer, 0, 0, SRCCOPY);
-        SelectObject(buffer, old); DeleteObject(bitmap); DeleteDC(buffer);
-        EndPaint(window, &ps);
+        if (app.minimized) apply_background();
+        web_ui_sync();
         return 0;
     }
     case WM_DESTROY:
+        web_ui_close();
+        media_close();
         settings_close();
         friends_close();
         if (!app.test_mode) updates_shutdown();
         else { KillTimer(window,904); local_test_close(); }
         link_stop();
-        DeleteObject(app.normal);
-        DeleteObject(app.title);
-        DeleteObject(app.caption_font);
-        DeleteObject(app.heading);
-        direct_icons_clear();
-        DeleteObject(app.background);
-        DeleteObject(app.field);
+        screen_shutdown();
+        service_link_shutdown();
+        identity_store_close();
         PostQuitMessage(0);
         return 0;
     default: return DefWindowProcW(window, message, wp, lp);
@@ -563,30 +669,37 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
     MSG message;
     BOOL result;
     (void)previous;
-    app.test_mode=!wcscmp(command,L"--test-pair") ? 1 : !wcscmp(command,L"--test-peer") ? 2 : 0;
+    app.record_mode=!wcscmp(command,L"--test-pair-record") || !wcscmp(command,L"--test-peer-record");
+    app.test_mode=(!wcscmp(command,L"--test-pair") || !wcscmp(command,L"--test-pair-record")) ? 1 :
+        (!wcscmp(command,L"--test-peer") || !wcscmp(command,L"--test-peer-record")) ? 2 : 0;
+    local_test_record_mode(app.record_mode);
+    if(app.record_mode) {
+        DWORD length=GetEnvironmentVariableW(L"DIRECT_SCREEN_RECORD_DIR",app.record_dir,MAX_PATH);
+        if(!length || length>=MAX_PATH) wcscpy_s(app.record_dir,MAX_PATH,L"out\\screen-diagnostic");
+    }
     if (updates_apply_command()) return 0;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     app.dpi = GetDpiForSystem();
     wc.lpfnWndProc = window_proc;
     wc.hInstance = instance;
-    wc.lpszClassName = L"MurmurNativeWindow";
+    wc.lpszClassName = L"MurmurWindow";
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     if (!RegisterClassW(&wc)) return 1;
-    window = CreateWindowExW(0, wc.lpszClassName, app.test_mode ? (app.test_mode==1 ? L"Direct — Client A · test local" : L"Direct — Client B · test local") : L"Direct — Messages et appels",
+    window = CreateWindowExW(0, wc.lpszClassName, app.test_mode ? (app.test_mode==1 ? L"Murmur — Client A · test local" : L"Murmur — Client B · test local") : L"Murmur — Messages et appels",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         px(1220), px(820), NULL, NULL, instance, NULL);
     if (!window) return 1;
     {
-        BOOL dark = FALSE;
-        COLORREF caption = sidebar;
+        BOOL dark = TRUE;
+        COLORREF caption = RGB(32, 32, 32);
         DwmSetWindowAttribute(window, 20, &dark, sizeof(dark));
         DwmSetWindowAttribute(window, 35, &caption, sizeof(caption));
         { int backdrop = 2, corners = 2;
           DwmSetWindowAttribute(window, 38, &backdrop, sizeof(backdrop));
           DwmSetWindowAttribute(window, 33, &corners, sizeof(corners)); }
     }
-    ShowWindow(window, show);
+    ShowWindow(window, app.record_mode ? SW_HIDE : show);
     if (app.test_mode) {
         MONITORINFO monitor={sizeof(monitor)}; int width,height,x,y;
         GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&monitor);
@@ -595,11 +708,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
         if (width<px(820)) { width=px(900); x=monitor.rcWork.left+(app.test_mode==2 ? 120 : 24); y+=app.test_mode==2 ? 60 : 0; }
         SetWindowPos(window,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE);
         app.test_deadline=GetTickCount64()+25000;
-        if (local_test_start(window,app.test_mode==2)) { app.test_failed=1; MessageBoxW(window,L"Impossible de démarrer le test. Lancez Test solo depuis la fenêtre principale.",L"Direct · Test local",MB_OK|MB_ICONWARNING); }
+        if (local_test_start(window,app.test_mode==2)) { app.test_failed=1; MessageBoxW(window,L"Impossible de démarrer le test. Lancez Test solo depuis la fenêtre principale.",L"Murmur · Test local",MB_OK|MB_ICONWARNING); }
         else SetTimer(window,904,250,NULL);
     }
     while ((result = GetMessageW(&message, NULL, 0, 0)) > 0) {
-        if (!settings_translate(&message) && !updates_translate(&message) && !friends_translate(&message) && !connection_auto_translate(&message) && !connection_translate(&message) && !IsDialogMessageW(window, &message)) {
+        if (!friends_translate(&message)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }

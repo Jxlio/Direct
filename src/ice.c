@@ -43,6 +43,8 @@ struct murmur_ice {
     uint8_t key[32], transport_id[32];
     datagram incoming[QUEUE], reliable[QUEUE], audio_in[QUEUE], audio_out, pending;
     unsigned in_head, in_count, out_head, out_count, audio_head, audio_count;
+    datagram screen_in[QUEUE], screen_out[QUEUE];
+    unsigned screen_head, screen_count, screen_out_head, screen_out_count;
     mbedtls_ssl_context tls;
     mbedtls_ssl_config config;
     mbedtls_entropy_context entropy;
@@ -337,6 +339,11 @@ int murmur_ice_step(murmur_ice *p, uint64_t now) {
                 datagram *d = &p->audio_in[(p->audio_head + p->audio_count) % QUEUE];
                 d->size = (size_t)r - 1; memcpy(d->bytes, bytes + 1, d->size); ++p->audio_count;
             }
+        } else if (bytes[0] == 4 && r > 1 && r <= MURMUR_SCREEN_PACKET + 1) {
+            if (p->screen_count < QUEUE) {
+                datagram *d = &p->screen_in[(p->screen_head + p->screen_count) % QUEUE];
+                d->size = (size_t)r - 1; memcpy(d->bytes, bytes + 1, d->size); ++p->screen_count;
+            }
         } else if (bytes[0] != 3 || r != 1) return fail(p, -33);
         mbedtls_platform_zeroize(bytes, sizeof(bytes));
     }
@@ -350,6 +357,10 @@ int murmur_ice_step(murmur_ice *p, uint64_t now) {
                 p->pending = p->reliable[p->out_head];
                 mbedtls_platform_zeroize(&p->reliable[p->out_head], sizeof(datagram));
                 p->out_head = (p->out_head + 1) % QUEUE; --p->out_count;
+            } else if (p->screen_out_count) {
+                p->pending = p->screen_out[p->screen_out_head];
+                mbedtls_platform_zeroize(&p->screen_out[p->screen_out_head], sizeof(datagram));
+                p->screen_out_head = (p->screen_out_head + 1) % QUEUE; --p->screen_out_count;
             } else if (now - p->last_heartbeat >= 1000) { p->pending.bytes[0] = 3; p->pending.size = 1; p->last_heartbeat = now; }
             else break;
         }
@@ -428,6 +439,25 @@ int murmur_ice_receive_audio(murmur_ice *p, uint8_t *data, size_t capacity, size
     p->audio_head = (p->audio_head + 1) % QUEUE; --p->audio_count;
     return 1;
 }
+int murmur_ice_send_screen(murmur_ice *p, const uint8_t *data, size_t size) {
+    datagram *d;
+    if (!p || p->state != 4 || !data || !size || size > MURMUR_SCREEN_PACKET) return -1;
+    if (p->screen_out_count == QUEUE) return 1;
+    d = &p->screen_out[(p->screen_out_head + p->screen_out_count) % QUEUE];
+    d->bytes[0] = 4; memcpy(d->bytes + 1, data, size); d->size = size + 1;
+    ++p->screen_out_count; return 0;
+}
+int murmur_ice_receive_screen(murmur_ice *p, uint8_t *data, size_t capacity, size_t *size) {
+    datagram *d;
+    if (size) *size = 0;
+    if (!p || !data || !size) return -1;
+    if (!p->screen_count) return 0;
+    d = &p->screen_in[p->screen_head];
+    if (capacity < d->size) return -1;
+    memcpy(data, d->bytes, d->size); *size = d->size;
+    mbedtls_platform_zeroize(d, sizeof(*d));
+    p->screen_head = (p->screen_head + 1) % QUEUE; --p->screen_count; return 1;
+}
 int murmur_ice_error(const murmur_ice *p) { return p ? p->error : -1; }
 int murmur_ice_relayed(const murmur_ice *p) { return p ? p->relayed : 0; }
 unsigned murmur_ice_wait_ms(const murmur_ice *p, uint64_t now) {
@@ -435,7 +465,7 @@ unsigned murmur_ice_wait_ms(const murmur_ice *p, uint64_t now) {
     if (!p || p->state < 0) return 1000;
     if (!p->remote_set) return 1000;
     if (p->state != 4) return 10;
-    if (p->pending.size || p->out_count || p->audio_out.size || p->kcp->ackcount ||
+    if (p->pending.size || p->out_count || p->audio_out.size || p->screen_out_count || p->kcp->ackcount ||
         p->kcp->nsnd_buf || p->kcp->nsnd_que) return 10;
     remaining = now - p->last_heartbeat;
     return remaining >= 1000 ? 0 : (unsigned)(1000 - remaining);

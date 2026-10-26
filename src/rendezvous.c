@@ -14,19 +14,22 @@ int direct_service_valid(const direct_service *s) {
     for(i=0;i<64;++i) if(!((s->access[i]>='0'&&s->access[i]<='9') || (s->access[i]>='a'&&s->access[i]<='f'))) return 0;
     return 1;
 }
+/* Codes keep the "direct2|" prefix until every installed client reads "murmur2|". */
+#define INVITE_PREFIX "direct2|"
+#define INVITE_PREFIX_RENAMED "murmur2|"
 int direct_invite_create(const uint8_t secret[32],const direct_service *s,char out[DIRECT_INVITE_MAX]) {
     char code[MURMUR_FRIEND_CODE]; int n;
     if(!secret || !out || murmur_friend_code(secret,code)) return -1;
     if(!s || !s->origin[0]) { memcpy(out,code,sizeof(code)); return 0; }
     if(!direct_service_valid(s)) return -1;
-    n=snprintf(out,DIRECT_INVITE_MAX,"direct2|%s|%s|%s",code,s->origin,s->access);
+    n=snprintf(out,DIRECT_INVITE_MAX,INVITE_PREFIX "%s|%s|%s",code,s->origin,s->access);
     mbedtls_platform_zeroize(code,sizeof(code)); return n>0 && n<DIRECT_INVITE_MAX?0:-1;
 }
 int direct_invite_parse(const char *code,uint8_t secret[32],direct_service *s) {
     char legacy[MURMUR_FRIEND_CODE]; direct_service candidate={{0},{0}}; uint8_t key[32];
     const char *split; size_t n; int result=-1;
     if(!code || !secret || !s || strlen(code)>=DIRECT_INVITE_MAX) return -1;
-    if(!strncmp(code,"direct2|",8)) {
+    if(!strncmp(code,INVITE_PREFIX,8) || !strncmp(code,INVITE_PREFIX_RENAMED,8)) {
         if(strlen(code)<8+72+1 || code[80]!='|') return -1;
         memcpy(legacy,code+8,72); legacy[72]=0;
         split=strchr(code+81,'|'); if(!split) return -1;

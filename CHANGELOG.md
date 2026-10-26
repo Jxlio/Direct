@@ -1,4 +1,44 @@
-# Direct — historique des versions
+# Murmur — historique des versions
+
+## 0.8.0 — 26 octobre 2026
+
+- **Accueil** au premier lancement (portrait du moodboard, trois étapes : bienvenue, nom/jour-nuit/couleurs, premier cercle ou invitation), passable et rejouable depuis Paramètres → Apparence.
+- **Deux couleurs d'accentuation** : principale (boutons, sélection) et secondaire (vos messages, pastilles, voix, voyants), toutes deux au choix ; **quatre logos** au choix (Pétales, Ondes, Anneaux, Cercles) ; nouvelles icônes (Cercles, Appels en ondes, Direct en deux cercles, Paramètres hexagonal) ; images du moodboard sur les couvertures des cercles.
+- Fin des lueurs (halos, ombres colorées, taches lumineuses) : l'interface est à plat.
+- **Audit de sécurité** : un message de type `constructor` désactivait la limite de débit du service (corrigé et testé, service redéployé) ; un message « membre » reçu ne peut plus faire passer quelqu'un pour propriétaire ; un changement de rôle sans signature valide est ignoré ; une clé de membre inutilisable n'empêche plus les autres de recevoir la nouvelle clé ; les adresses de service des invitations qui visent un réseau local sont refusées ; les serveurs ICE reçus sont filtrés (`stun:`, `turn:`, `turns:`).
+- **Nouvelle identité visuelle** d'après le moodboard : Encre et Sable, corail en accent par défaut, logo en deux pétales, titres en Bahnschrift, boutons et champ de saisie arrondis, messages envoyés en couleur d'accent pleine. **Nuit** (défaut), **Jour** et **Auto** (suit le réglage jour/nuit de Windows). Les accents Corail, Lime, Violet et Graphite de la palette rejoignent les autres, et n'importe quelle couleur reste possible.
+- Les serveurs deviennent des **cercles** dans toute l'interface, avec une page d'accueil en cartes à couverture (six motifs, choisis d'après le nom).
+- Thème **Marathon** (inspiré du jeu, aucun de ses éléments n'est utilisé) : noir, jaune-vert acide, angles tranchés, quadrillage et lignes de balayage fixes ; il propose sa couleur d'accentuation en s'activant.
+- **Sons de l'interface** fabriqués par l'application (message envoyé et reçu, mention, entrée et sortie d'un appel, micro coupé, panneaux) : rien à télécharger, activables et réglables par personne dans Paramètres.
+- **Animations de messages** : un message qui arrive glisse en place, un message modifié clignote une fois, une réaction qui s'ajoute rebondit ; une page d'historique ne s'anime pas.
+- `scripts/setup_turn.ps1` pour saisir les secrets du relais sans les afficher, et `server/test/turn_live.mjs` pour vérifier que le service en ligne distribue bien un relais.
+- **Paramètres du serveur** (clic sur l'en-tête du serveur) : Aperçu, Salons, Membres (rôles, exclusion, propriété, réintégration), Invitations (durée et nombre d'utilisations au choix), Avancé. La colonne de gauche ne garde qu'une liste de membres calme, avec leur rôle.
+- Apparence : lueur d'accent, dégradés, transitions de pages, anneau de parole qui pulse, boutons à reflet ; uniquement des animations de transformation et d'opacité (peu coûteuses), désactivées si le système demande moins de mouvement.
+- Correction : à la création d'un serveur, le nom du fondateur remplaçait le nom du serveur. Le champ `title` porte désormais le nom du serveur (`name` reste celui du fondateur).
+- Service `murmur-service` déployé sur Cloudflare Workers.
+- Salons vocaux de groupe (maillage WebRTC jusqu'à 8), signalisation chiffrée et signée, relais TURN à la demande, statistiques d'appel.
+- Messagerie : réponses, modification, suppression, réactions, emoji, mentions, indicateur de saisie, pièces jointes chiffrées, recherche, notifications fenêtre réduite.
+- Rôles : modérateur, transfert de propriété, réintégration d'un exclu.
+- Seuils personnels : seuil du micro et sensibilité de « qui parle », propres à chaque personne.
+- Pas encore : SFU, secret après compromission, déploiement du service, mesures sur un vrai réseau, SpeexDSP natif (optionnel, non testé).
+- Nouveau nom : **Murmur** (anciennement Direct) dans la fenêtre, l'exécutable `Murmur.exe`, les messages et la documentation.
+- Les codes amis `direct2|` restent émis pour rester lisibles par les versions 0.7 ; le préfixe `murmur2|` est déjà accepté.
+- Les mises à jour continuent d'utiliser les fichiers `Direct-win-x64.*` du dépôt `Jxlio/Direct`.
+- Le mode natif (`--native-ui`) et ses panneaux Win32 sont supprimés : l’interface est uniquement web (WebView2). Sans WebView2, Murmur l’indique puis se ferme.
+- Script `scripts/measure_performance.ps1` et document de performance.
+- Identité de l'utilisateur : clé ECDSA P-256 protégée par Windows, empreinte affichée dans Paramètres.
+- Messages envoyés à la page par différences et liste fenêtrée : 10 000 messages restent fluides, au plus 200 nœuds dans la page.
+- Correction : la zone de conversation ne défilait pas quand elle contenait beaucoup de messages (le champ de saisie sortait de la fenêtre).
+- Serveurs (bêta) : créer ou rejoindre un serveur, salons, historique, invitations `murmur4|…`, non-lus, reconnexion automatique.
+- **Qui parle** : un anneau de couleur autour de l'avatar de la personne qui parle pendant un appel, mesuré sur le son réel (micro et réception).
+- **Couleur d'accentuation** (vert par défaut) et **sept thèmes** : Sombre, Minuit, Noir pur, Crépuscule, Clair, Contraste élevé, Marathon ; taille du texte réglable ; fichier `user.css` pour tout personnaliser.
+- Chacun choisit son nom sur les serveurs (signé, modifiable, homonymes distingués par un suffixe).
+- Le propriétaire peut exclure un membre : nouvelle clé de groupe pour les messages suivants, l'exclu est déconnecté et ne peut plus revenir avec la même identité, ses anciens messages restent vérifiables.
+- Les messages d'un serveur sont chiffrés de bout en bout (AES-256-GCM, clé de groupe remise par le propriétaire, messages signés). L'invitation contient l'empreinte du propriétaire pour déjouer un faux propriétaire. Pas de secret après compromission ni d'exclusion de membre pour l'instant.
+- Nouveau service isolé `server/` (Cloudflare) et son contrat de protocole, vérifiés de bout en bout avec la vraie application.
+- Mémoire : options du moteur WebView2 mesurées une à une, profil déplacé dans `%LOCALAPPDATA%\Murmur\webview2`, page suspendue quand la fenêtre est réduite hors appel (environ −10 % au repos).
+- Plans : architecture des serveurs et contrat de protocole.
+
 
 ## 0.7.0 — 21 octobre 2026
 

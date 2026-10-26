@@ -36,4 +36,9 @@ int murmur_ice_receive(murmur_ice *peer, murmur_kind *kind, unsigned *room,
                         uint8_t *data, size_t capacity, size_t *size);
 int murmur_ice_send_audio(murmur_ice *peer, const uint8_t *data, size_t size);
 int murmur_ice_receive_audio(murmur_ice *peer, uint8_t *data, size_t capacity, size_t *size);
+/* Bounded, unreliable screen datagrams on the authenticated DTLS association.
+ * 0 queued, 1 backpressure, -1 invalid. Owner thread only. */
+#define MURMUR_SCREEN_PACKET 1000u
+int murmur_ice_send_screen(murmur_ice *peer, const uint8_t *data, size_t size);
+int murmur_ice_receive_screen(murmur_ice *peer, uint8_t *data, size_t capacity, size_t *size);
 #endif

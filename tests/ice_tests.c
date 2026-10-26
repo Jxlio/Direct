@@ -127,6 +127,24 @@ static int exchange(int relay) {
         murmur_voice_get_stats(decoder, &stats); CHECK(stats.decoded == 1);
         murmur_voice_free(encoder); murmur_voice_free(decoder);
     }
+    {
+        unsigned i;
+        memset(payload,0x5a,MURMUR_SCREEN_PACKET);
+        CHECK(murmur_ice_send_screen(host,payload,MURMUR_SCREEN_PACKET+1)==-1);
+        CHECK(murmur_ice_send_screen(host,payload,0)==-1);
+        for(i=0;i<16;++i) CHECK(!murmur_ice_send_screen(host,payload,MURMUR_SCREEN_PACKET));
+        CHECK(murmur_ice_send_screen(host,payload,1)==1);
+        deadline=now_ms()+4000; got=0;
+        do {
+            CHECK(murmur_ice_step(client,now_ms())==4 && murmur_ice_step(host,now_ms())==4);
+            if(murmur_ice_receive_screen(client,incoming,sizeof(incoming),&size)==1) {
+                CHECK(size==MURMUR_SCREEN_PACKET && !memcmp(payload,incoming,size)); ++got;
+            }
+            if(got==16) break;
+            pause_ms();
+        } while(now_ms()<deadline);
+        CHECK(got==16);
+    }
     murmur_ice_free(client); murmur_ice_free(host);
     if (server) juice_server_destroy(server);
     puts(relay ? "Authenticated offer/answer, encrypted reliable text and Opus through local TURN passed." :

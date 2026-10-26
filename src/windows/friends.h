@@ -13,7 +13,18 @@ void friends_internet_event(void);
 const WCHAR *friends_peer_name(void);
 int friends_auto_connecting(void);
 int friends_peer_id(uint8_t route[32]);
-void friends_show(HWND parent);
 int friends_translate(MSG *message);
 void friends_close(void);
+/* Main-window UI: no secondary window is required for these actions. */
+unsigned friends_web_count(void);
+const WCHAR *friends_web_name(unsigned index);
+int friends_web_online(unsigned index);
+const WCHAR *friends_web_notice(void);
+int friends_web_internet_enabled(void);
+int friends_web_create(const WCHAR *name, WCHAR code[512]);
+int friends_web_add(const WCHAR *name, const WCHAR *code);
+int friends_web_code(unsigned index, WCHAR code[512]);
+void friends_web_connect(unsigned index);
+void friends_web_disconnect(void);
+int friends_web_forget(unsigned index);
 #endif

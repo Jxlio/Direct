@@ -2,7 +2,7 @@
 
 Depuis 0.6.1, **Paramètres → Test solo · ouvrir deux clients** ouvre Client A et Client B.
 Leurs fenêtres sont placées côte à côte si l'écran est assez large, sinon en cascade.
-La fenêtre principale qui lance le test est minimisée et reste disponible.
+La fenêtre principale reste ouverte. Deux fenêtres de test apparaissent séparément.
 
 Les deux processus utilisent de vrais agents ICE, une authentification DTLS,
 le transport fiable des messages et les codecs audio existants. Les descriptions
@@ -28,7 +28,7 @@ Fermez les deux fenêtres de test à la fin. Le pair restant constate la déconn
 après expiration du heartbeat/consentement réseau ; cela peut prendre quelques
 secondes. L'historique de messages est seulement en mémoire, comme dans le mode normal.
 
-Pour lancer depuis une commande : `Direct.exe --test-pair`. Le mode `--test-peer`
+Pour lancer depuis une commande : `Murmur.exe --test-pair`. Le mode `--test-peer`
 est réservé au processus enfant, avec ses pipes hérités. Le rendu reste déclenché
 par événements au repos ; un rafraîchissement modéré est utilisé pendant la
 négociation et l'appel simulé pour afficher les compteurs.

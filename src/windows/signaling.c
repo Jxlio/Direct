@@ -1,4 +1,5 @@
 #include "signaling.h"
+#include "datadir.h"
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <shlobj.h>
@@ -15,7 +16,7 @@ static struct {
     unsigned in_head,in_count,out_head,out_count;
 } hub;
 static int profile_path(WCHAR path[MAX_PATH]) {
-    if(FAILED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,SHGFP_TYPE_CURRENT,path)) || wcslen(path)>MAX_PATH-32) return -1;
+    if(FAILED(murmur_local_appdata(path)) || wcslen(path)>MAX_PATH-32) return -1;
     wcscat_s(path,MAX_PATH,L"\\Murmur"); CreateDirectoryW(path,NULL);
     wcscat_s(path,MAX_PATH,L"\\service.dat"); return 0;
 }
@@ -37,7 +38,7 @@ int signal_profile_save(const direct_service *profile) {
     if(!direct_service_valid(profile) || profile_path(path)) return -1;
     swprintf_s(temporary,MAX_PATH,L"%ls.tmp",path);
     input.pbData=(BYTE *)profile; input.cbData=sizeof(*profile);
-    if(!CryptProtectData(&input,L"Direct service v1",NULL,NULL,NULL,CRYPTPROTECT_UI_FORBIDDEN,&output)) return -1;
+    if(!CryptProtectData(&input,L"Murmur service v1",NULL,NULL,NULL,CRYPTPROTECT_UI_FORBIDDEN,&output)) return -1;
     file=CreateFileW(temporary,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file!=INVALID_HANDLE_VALUE) {
         if(WriteFile(file,output.pbData,output.cbData,&written,NULL) && written==output.cbData && FlushFileBuffers(file)) result=0;
@@ -97,7 +98,7 @@ static HINTERNET connect_socket(HINTERNET session) {
 }
 static DWORD WINAPI worker(void *unused) {
     HINTERNET session; unsigned retry=1; HANDLE events[2]={hub.stop,hub.wake}; (void)unused;
-    session=WinHttpOpen(L"Direct/0.7",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0);
+    session=WinHttpOpen(L"Murmur/0.7",WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0);
     if(!session) { status(3); return 0; }
     WinHttpSetTimeouts(session,5000,5000,5000,5000);
     while(WaitForSingleObject(hub.stop,0)!=WAIT_OBJECT_0) {

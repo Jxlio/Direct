@@ -1,9 +1,9 @@
-# Service de mise en relation Direct
+# Service de mise en relation Murmur
 
 Petit service privé Cloudflare Workers Free. Il transmet uniquement des
 informations de connexion chiffrées entre les clients natifs. Aucun texte de
 conversation, audio ou partage d’écran ne transite par ce service.
-Le client reste en C ; aucun runtime JavaScript n’est ajouté à Direct.exe.
+Le client reste en C ; aucun runtime JavaScript n’est ajouté à Murmur.exe.
 
 ## Déployer une fois pour le groupe
 

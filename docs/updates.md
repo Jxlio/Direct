@@ -1,4 +1,4 @@
-# Versions et mises à jour — Direct 0.6
+# Versions et mises à jour — Murmur 0.6
 
 ## Comportement utilisateur
 
@@ -12,7 +12,7 @@
   sauf si une vérification manuelle est effectuée pendant un appel. Dans ce cas,
   un bouton propose le téléchargement. Il n'y a pas de vérification périodique.
 - Une mise à jour authentifiée est appliquée à la fermeture normale, sans fermer
-  une conversation à la place de l'utilisateur. Direct ne redémarre pas seul.
+  une conversation à la place de l'utilisateur. Murmur ne redémarre pas seul.
 - Avant 0.6, une installation manuelle du nouveau ZIP est nécessaire une fois.
 - Les versions publiques sont disponibles sur [GitHub Releases](https://github.com/Jxlio/Direct/releases).
 
@@ -21,7 +21,7 @@
 Le tag doit être `vX.Y.Z` et correspondre à la version numérique de CMake et
 à la ressource VERSIONINFO Windows. Exemples pour 0.6.0 :
 
-- `Direct-0.6.0-Windows-x64.zip` : première installation et dépannage.
+- `Murmur-0.6.0-Windows-x64.zip` : première installation et dépannage.
 - `Direct-win-x64.exe` : exécutable autonome de mise à jour.
 - `Direct-win-x64.manifest` : plateforme, version, taille et SHA-256.
 - `Direct-win-x64.sig` : signature ECDSA P-256/SHA-256 du manifeste exact.
@@ -51,7 +51,7 @@ pas modifiés. En cas d'échec avant remplacement, le fichier initial reste inta
 La sauvegarde conserve une seule version. Il n'y a pas de restauration automatique
 après un crash de la nouvelle version ; la sauvegarde permet un dépannage manuel.
 
-Cette première génération remplace **uniquement Direct.exe**. Les bibliothèques
+Cette première génération remplace **uniquement Murmur.exe**. Les bibliothèques
 du projet sont statiques et les notices de licences sont intégrées à l'exécutable.
 Le runtime Visual C++ initial reste dans le dossier. Toute future version ajoutant
 une DLL ou exigeant un nouveau runtime doit passer par un nouveau ZIP/installeur
@@ -87,7 +87,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ./scripts/package_windows.ps1
-python scripts/sign_update.py --version 0.6.0 --exe build/Release/Direct.exe --key "$env:LOCALAPPDATA/DirectPublisher/update-signing.pem" --output out/release
+python scripts/sign_update.py --version 0.6.0 --exe build/Release/Murmur.exe --key "$env:LOCALAPPDATA/DirectPublisher/update-signing.pem" --output out/release
 ```
 
 ## Validation effectuée

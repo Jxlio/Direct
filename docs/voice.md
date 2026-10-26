@@ -17,9 +17,9 @@ l'envoi. Quitter le vocal, la sortie du proche ou la deconnexion libere les
 peripheriques via le worker, sans attendre une action de l'interface.
 
 Les autorisations micro de l'OS restent necessaires. Le prototype n'a pas
-d'annulation d'echo : utiliser un casque pour les premiers essais. Pas de choix
-de peripherique, suppression de bruit ou reglage de gain dans cette version.
-Le partage d'ecran n'est pas implemente et son bouton ne capture rien.
+d'annulation d'echo : utiliser un casque pour les premiers essais. Le choix des peripheriques et les volumes existent depuis 0.6.1 (voir la fin de cette
+page) ; il n'y a toujours pas de suppression de bruit ni de controle automatique du gain.
+Le partage d'ecran video est decrit dans interface.md.
 
 ## Transport
 
@@ -119,3 +119,17 @@ audio entièrement simulé ; ses tests de périphériques sont désactivés.
 Les appels ont un état entrant explicite et demandent une réponse locale avant
 d’ouvrir les périphériques. L’état muet du correspondant est affiché et un
 raccrochage termine la participation des deux personnes.
+
+## Qui parle (0.8)
+
+`murmur_voice_levels` donne, de 0 à 100, la force de ce que le micro envoie et de ce que l'autre côté envoie
+(échelle racine carrée du pic, qui suit mieux l'oreille : la parole normale tombe entre 30 et 70, une pièce calme
+sous 10). Un côté vaut 0 s'il est muet ou si aucun son n'est arrivé depuis 150 ms. Le codec traite un son pur et
+stable comme du bruit de confort (DTX) : les tests utilisent donc du bruit fort, que Opus prend pour de la parole.
+
+## Seuil du micro et traitement du son (0.8)
+
+La configuration audio contient maintenant `echo`, `noise`, `agc` et `gate`. Le seuil (`gate`, 0 à 100, même échelle que
+les niveaux) coupe l'envoi quand le micro reste en dessous. Pour le vocal à deux natif, l'annulation d'écho, la réduction
+de bruit et le gain automatique reposent sur SpeexDSP, **désactivé par défaut** (`-DMURMUR_ENABLE_SPEEXDSP=ON`, qui télécharge
+la bibliothèque) ; ce code n'a pas encore été compilé ni testé. Les salons vocaux de la page utilisent, eux, le traitement du navigateur.

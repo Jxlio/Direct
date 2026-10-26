@@ -10,7 +10,11 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 #include <opus.h>
+#ifdef MURMUR_HAVE_DSP
+#include "murmur/dsp.h"
+#endif
 #include "murmur/voice.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +31,16 @@ struct murmur_voice {
     OpusDecoder *decoder;
     int device_ready, capture_ready, playback_ready, playing;
     ma_uint32 muted, input_volume, output_volume;
+    ma_uint32 gate, gate_hold;       /* microphone gate: loudness 0-100, and samples left until it closes */
+#ifdef MURMUR_HAVE_DSP
+    murmur_dsp *dsp;
+    ma_uint32 dsp_options, dsp_dirty; /* packed switches handed from the owner thread to the audio callback */
+#endif
+    /* Loudness for "who is speaking": producers raise a decaying peak and count frames; only
+       the owner thread reads them, remembering when each counter last moved. */
+    ma_uint32 in_peak, out_peak, in_frames, out_frames;
+    ma_uint32 seen_in, seen_out;
+    uint64_t seen_in_ms, seen_out_ms;
     uint32_t sequence, expected, last_played, last_real, history, highest;
     int initialized, scheduled, started, have_played, have_real, have_highest, missing;
     uint64_t deadline;
@@ -34,6 +48,17 @@ struct murmur_voice {
     murmur_voice_stats stats;
     int16_t capture_memory[RING_SAMPLES], playback_memory[RING_SAMPLES];
 };
+static void raise_level(ma_uint32 *peak, ma_uint32 *frames, unsigned value) {
+    ma_uint32 old = ma_atomic_load_32(peak), decayed = old - old / 6;
+    ma_atomic_store_32(peak, value > decayed ? value : decayed);
+    ma_atomic_fetch_add_32(frames, 1);
+}
+static unsigned peak_of(const int16_t *samples, size_t count) {
+    unsigned peak = 0;
+    size_t i;
+    for (i = 0; i < count; ++i) { unsigned value = (unsigned)abs((int)samples[i]); if (value > peak) peak = value; }
+    return peak;
+}
 static size_t write_ring(ma_pcm_rb *ring, const int16_t *samples, size_t count) {
     size_t done = 0;
     while (done < count) {
@@ -58,15 +83,35 @@ static size_t read_ring(ma_pcm_rb *ring, int16_t *samples, size_t count) {
     }
     return done;
 }
+/* Loudness 0-100 to the peak it stands for, the inverse of loudness() below. */
+static unsigned gate_peak(unsigned level) { return (unsigned)((double)level * level * 32768.0 / 10000.0); }
 void murmur_voice_capture(murmur_voice *v, const int16_t *samples, size_t count) {
     if (!v || !samples || ma_atomic_load_32(&v->muted)) return;
     /* Overflow drops incoming samples. The consumer skips stale queued capture. */
     {
-        int16_t adjusted[256]; size_t offset=0; unsigned gain=ma_atomic_load_32(&v->input_volume);
-        while (offset<count) {
-            size_t i,n=count-offset; if(n>256) n=256;
-            for(i=0;i<n;++i) adjusted[i]=(int16_t)((int)samples[offset+i]*(int)gain/100);
-            write_ring(&v->capture,adjusted,n); offset+=n;
+        int16_t adjusted[256]; size_t offset = 0; unsigned gain = ma_atomic_load_32(&v->input_volume);
+        unsigned gate = ma_atomic_load_32(&v->gate);
+        while (offset < count) {
+            size_t i, n = count - offset; if (n > 256) n = 256;
+            memcpy(adjusted, samples + offset, n * sizeof(int16_t));
+#ifdef MURMUR_HAVE_DSP
+            if (v->dsp) {
+                if (ma_atomic_load_32(&v->dsp_dirty)) {
+                    ma_uint32 packed = ma_atomic_load_32(&v->dsp_options);
+                    murmur_dsp_options options = { (int)(packed & 1), (int)((packed >> 1) & 1), (int)((packed >> 2) & 1) };
+                    murmur_dsp_set(v->dsp, &options); ma_atomic_store_32(&v->dsp_dirty, 0);
+                }
+                murmur_dsp_near(v->dsp, adjusted, n);
+            }
+#endif
+            for (i = 0; i < n; ++i) adjusted[i] = (int16_t)((int)adjusted[i] * (int)gain / 100);
+            if (gate) {
+                /* Open while there is voice, and for 150 ms after, so the ends of words are not clipped. */
+                if (peak_of(adjusted, n) >= gate_peak(gate)) v->gate_hold = 7200;
+                else if (v->gate_hold > n) v->gate_hold -= (ma_uint32)n; else v->gate_hold = 0;
+                if (!v->gate_hold) memset(adjusted, 0, n * sizeof(int16_t));
+            }
+            write_ring(&v->capture, adjusted, n); raise_level(&v->in_peak, &v->in_frames, peak_of(adjusted, n)); offset += n;
         }
     }
 }
@@ -84,14 +129,21 @@ void murmur_voice_playback(murmur_voice *v, int16_t *samples, size_t count) {
 }
 static void callback(ma_device *device, void *output, const void *input, ma_uint32 count) {
     murmur_voice *v = device->pUserData;
-    if (input) murmur_voice_capture(v, input, count);
+    /* Playback first: what goes to the speakers is the reference the echo canceller needs for what the microphone hears. */
     if (output) murmur_voice_playback(v, output, count);
+#ifdef MURMUR_HAVE_DSP
+    if (v->dsp && output) murmur_dsp_far(v->dsp, output, count);
+#endif
+    if (input) murmur_voice_capture(v, input, count);
 }
 void murmur_voice_free(murmur_voice *v) {
     if (!v) return;
     if (v->device_ready) ma_device_uninit(&v->device);
     if (v->capture_ready) ma_pcm_rb_uninit(&v->capture);
     if (v->playback_ready) ma_pcm_rb_uninit(&v->playback);
+#ifdef MURMUR_HAVE_DSP
+    if (v->dsp) murmur_dsp_free(v->dsp);
+#endif
     if (v->encoder) opus_encoder_destroy(v->encoder);
     if (v->decoder) opus_decoder_destroy(v->decoder);
     /* Use a volatile wipe for locally buffered PCM. */
@@ -104,6 +156,12 @@ murmur_voice *murmur_voice_create_config(int hardware, const murmur_audio_config
     int error;
     if (!v) return NULL;
     murmur_voice_volume(v, settings ? settings->input_volume : 100, settings ? settings->output_volume : 100);
+    ma_atomic_store_32(&v->gate, settings && settings->gate <= 100 ? settings->gate : 0);
+#ifdef MURMUR_HAVE_DSP
+    { murmur_dsp_options options = { settings ? !!settings->echo : 0, settings ? !!settings->noise : 0, settings ? !!settings->agc : 0 };
+      v->dsp = murmur_dsp_create(&options);
+      ma_atomic_store_32(&v->dsp_options, (ma_uint32)(options.echo | options.noise << 1 | options.agc << 2)); }
+#endif
     v->encoder = opus_encoder_create(MURMUR_VOICE_RATE, 1, OPUS_APPLICATION_VOIP, &error);
     if (!v->encoder || error != OPUS_OK) goto fail;
     v->decoder = opus_decoder_create(MURMUR_VOICE_RATE, 1, &error);
@@ -145,7 +203,27 @@ fail:
     return NULL;
 }
 void murmur_voice_mute(murmur_voice *v, int muted) {
-    if (v) ma_atomic_store_32(&v->muted, muted ? 1u : 0u);
+    if (!v) return;
+    ma_atomic_store_32(&v->muted, muted ? 1u : 0u);
+    if (muted) ma_atomic_store_32(&v->in_peak, 0);
+}
+static unsigned loudness(unsigned peak) {
+    double scaled = 100.0 * sqrt((double)peak / 32768.0);
+    return scaled > 100.0 ? 100u : (unsigned)scaled;
+}
+void murmur_voice_levels(murmur_voice *v, uint64_t now_ms, unsigned *input, unsigned *output) {
+    ma_uint32 frames;
+    unsigned in_level = 0, out_level = 0;
+    if (v) {
+        frames = ma_atomic_load_32(&v->in_frames);
+        if (frames != v->seen_in) { v->seen_in = frames; v->seen_in_ms = now_ms; }
+        if (now_ms - v->seen_in_ms <= 150 && !ma_atomic_load_32(&v->muted)) in_level = loudness(ma_atomic_load_32(&v->in_peak));
+        frames = ma_atomic_load_32(&v->out_frames);
+        if (frames != v->seen_out) { v->seen_out = frames; v->seen_out_ms = now_ms; }
+        if (now_ms - v->seen_out_ms <= 150) out_level = loudness(ma_atomic_load_32(&v->out_peak));
+    }
+    if (input) *input = in_level;
+    if (output) *output = out_level;
 }
 int murmur_voice_encode(murmur_voice *v, uint8_t packet[MURMUR_VOICE_PACKET]) {
     int16_t pcm[MURMUR_VOICE_SAMPLES];
@@ -281,6 +359,7 @@ void murmur_voice_pump(murmur_voice *v, uint64_t now_ms) {
             if (result != MURMUR_VOICE_SAMPLES) memset(pcm, 0, sizeof(pcm));
         } else {
             v->missing = 0; ++v->stats.decoded;
+            raise_level(&v->out_peak, &v->out_frames, peak_of(pcm, MURMUR_VOICE_SAMPLES));
             v->last_real = v->expected; v->have_real = 1;
         }
         write_ring(&v->playback, pcm, MURMUR_VOICE_SAMPLES);
@@ -300,6 +379,24 @@ void murmur_voice_get_stats(const murmur_voice *v, murmur_voice_stats *stats) {
 void murmur_audio_defaults(murmur_audio_config *config) {
     if (!config) return;
     memset(config,0,sizeof(*config)); config->input_volume=config->output_volume=100;
+    config->echo = config->noise = 1;           /* on by default wherever the build can do it */
+}
+void murmur_voice_options(murmur_voice *v, unsigned echo, unsigned noise, unsigned agc, unsigned gate) {
+    if (!v) return;
+    ma_atomic_store_32(&v->gate, gate > 100 ? 0 : gate);
+#ifdef MURMUR_HAVE_DSP
+    { ma_uint32 packed = (echo ? 1u : 0u) | (noise ? 2u : 0u) | (agc ? 4u : 0u);
+      if (packed != ma_atomic_load_32(&v->dsp_options)) { ma_atomic_store_32(&v->dsp_options, packed); ma_atomic_store_32(&v->dsp_dirty, 1); } }
+#else
+    (void)echo; (void)noise; (void)agc;
+#endif
+}
+int murmur_voice_cleanup_available(void) {
+#ifdef MURMUR_HAVE_DSP
+    return 1;
+#else
+    return 0;
+#endif
 }
 murmur_voice *murmur_voice_create(int hardware) { return murmur_voice_create_config(hardware,NULL); }
 void murmur_voice_volume(murmur_voice *v,unsigned input,unsigned output) {

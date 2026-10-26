@@ -30,6 +30,66 @@ int main(void) {
         if (frame == 90) { memcpy(last, packet, (size_t)size); last_size = size; }
     }
     CHECK(nonzero > 70000 && error_sum > 1000000);
+    /* "Who is speaking". The test tone above is coded as comfort noise (DTX), so this uses loud noise,
+       which the codec treats as speech. Loud while audio flows; zero when it stops or the microphone is muted. */
+    { murmur_voice *talker = murmur_voice_create(0), *listener = murmur_voice_create(0);
+      unsigned in_level = 99, out_level = 99, seed = 12345;
+      int16_t noise[MURMUR_VOICE_SAMPLES], hush[MURMUR_VOICE_SAMPLES] = {0};
+      int k;
+      CHECK(talker && listener);
+      for (k = 0; k < 60; ++k) {
+          for (i = 0; i < MURMUR_VOICE_SAMPLES; ++i) { seed = seed * 1103515245u + 12345u; noise[i] = (int16_t)((int)((seed >> 16) % 16001) - 8000); }
+          murmur_voice_capture(talker, noise, MURMUR_VOICE_SAMPLES);
+          size = murmur_voice_encode(talker, packet);
+          CHECK(size > 4);
+          CHECK(murmur_voice_decode(listener, packet, (size_t)size) == 1);
+          murmur_voice_pump(listener, (uint64_t)k * 20);
+          murmur_voice_playback(listener, output, MURMUR_VOICE_SAMPLES);
+      }
+      murmur_voice_levels(talker, 1190, &in_level, &out_level);
+      CHECK(in_level > 40 && in_level < 100 && out_level == 0);         /* the talker hears itself loud; nothing came back */
+      murmur_voice_levels(listener, 1190, &in_level, &out_level);
+      CHECK(out_level > 25 && in_level == 0);                           /* the listener plays the peer; its microphone is silent */
+      murmur_voice_levels(listener, 1500, &in_level, &out_level);
+      CHECK(out_level == 0);                                            /* the peer went quiet */
+      murmur_voice_levels(talker, 1500, &in_level, &out_level);
+      CHECK(in_level == 0);                                             /* no new microphone audio either */
+      murmur_voice_capture(talker, noise, MURMUR_VOICE_SAMPLES);
+      murmur_voice_levels(talker, 1510, &in_level, &out_level);
+      CHECK(in_level > 40);
+      murmur_voice_mute(talker, 1);
+      murmur_voice_levels(talker, 1520, &in_level, &out_level);
+      CHECK(in_level == 0);                                             /* muted reads as silent at once */
+      murmur_voice_mute(talker, 0);
+      for (k = 0; k < 40; ++k) murmur_voice_capture(talker, hush, MURMUR_VOICE_SAMPLES);
+      murmur_voice_levels(talker, 1530, &in_level, &out_level);
+      CHECK(in_level < 5);                                              /* silence decays away */
+      murmur_voice_levels(NULL, 0, &in_level, &out_level);
+      CHECK(in_level == 0 && out_level == 0);
+      murmur_voice_levels(talker, 1540, NULL, NULL);
+      /* The microphone gate: below the chosen loudness nothing is sent; above it, the voice passes and the
+         gate stays open a moment after, so the ends of words are kept. */
+      { int16_t faint[MURMUR_VOICE_SAMPLES]; unsigned level_in = 0, ignored = 0, again = 99;
+        for (i = 0; i < MURMUR_VOICE_SAMPLES; ++i) { seed = seed * 1103515245u + 12345u; faint[i] = (int16_t)((int)((seed >> 16) % 1001) - 500); }
+        murmur_voice_options(talker, 0, 0, 0, 30);
+        for (k = 0; k < 20; ++k) murmur_voice_capture(talker, faint, MURMUR_VOICE_SAMPLES);
+        murmur_voice_levels(talker, 2000, &level_in, &ignored);
+        CHECK(level_in == 0);                                           /* faint noise stays behind the gate */
+        murmur_voice_capture(talker, noise, MURMUR_VOICE_SAMPLES);
+        murmur_voice_levels(talker, 2010, &level_in, &ignored);
+        CHECK(level_in > 40);                                           /* a voice opens it */
+        murmur_voice_capture(talker, faint, MURMUR_VOICE_SAMPLES);
+        murmur_voice_levels(talker, 2020, &level_in, &ignored);
+        CHECK(level_in > 20);                                           /* still open right after the voice stopped */
+        for (k = 0; k < 12; ++k) murmur_voice_capture(talker, faint, MURMUR_VOICE_SAMPLES);
+        murmur_voice_levels(talker, 2030, &again, &ignored);
+        CHECK(again < 5);                                               /* closed again after the pause */
+        murmur_voice_options(talker, 0, 0, 0, 0);
+        for (k = 0; k < 3; ++k) murmur_voice_capture(talker, faint, MURMUR_VOICE_SAMPLES);
+        murmur_voice_levels(talker, 2040, &level_in, &ignored);
+        CHECK(level_in > 3);                                            /* with the gate off the faint sound passes */
+        CHECK(murmur_voice_cleanup_available() == 0 || murmur_voice_cleanup_available() == 1); }
+      murmur_voice_free(talker); murmur_voice_free(listener); }
     CHECK(murmur_voice_decode(receiver, packet, (size_t)size) == 0); /* duplicate */
     CHECK(murmur_voice_decode(receiver, last, (size_t)last_size) == 0); /* out of order */
     CHECK(murmur_voice_decode(receiver, packet, 4) == 0);

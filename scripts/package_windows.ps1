@@ -9,9 +9,9 @@ $outputRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
 $versionMatch = [regex]::Match([IO.File]::ReadAllText((Join-Path $projectRoot "CMakeLists.txt")), 'project\(Murmur VERSION ([0-9.]+)')
 if (!$versionMatch.Success) { throw "Version introuvable" }
 $version = $versionMatch.Groups[1].Value
-$application = Join-Path $buildRoot "Direct.exe"
+$application = Join-Path $buildRoot "Murmur.exe"
 if ([Diagnostics.FileVersionInfo]::GetVersionInfo($application).ProductVersion -ne $version) { throw "Version du binaire différente de CMake" }
-$packageRoot = Join-Path $outputRoot "Direct-$version-Windows-x64"
+$packageRoot = Join-Path $outputRoot "Murmur-$version-Windows-x64"
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Copy-Item -LiteralPath $application -Destination $packageRoot -Force
 Copy-Item -LiteralPath (Join-Path $buildRoot "licenses") -Destination $packageRoot -Recurse -Force
@@ -24,9 +24,9 @@ if (!$runtime) { throw "Runtime redistribuable x64 introuvable" }
 Copy-Item -LiteralPath $runtime -Destination $packageRoot -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "CHANGELOG.md") -Destination $packageRoot -Force
 $readme = @"
-DIRECT $version - MESSAGES ET APPELS - WINDOWS 10/11 64 BITS
+MURMUR $version - MESSAGES ET APPELS - WINDOWS 10/11 64 BITS
 
-Extraire tout le ZIP puis ouvrir Direct.exe. Garder les fichiers ensemble.
+Extraire tout le ZIP puis ouvrir Murmur.exe. Garder les fichiers ensemble.
 Parametres > Versions affiche l'historique et les mises a jour depuis Jxlio/Direct.
 Une mise a jour signee est telechargee automatiquement au lancement, puis
 installee a la fermeture. Aucun appel n'est ferme pour appliquer une mise a jour.
@@ -36,7 +36,7 @@ les peripheriques. Test solo ouvre deux clients locaux avec un audio simule :
 ce mode reste silencieux et ne reproduit pas deux acces Internet.
 
 Pour ajouter un ami : Amis > Creer un code ami. Envoyer le code en prive.
-L'autre personne l'ajoute avec son nom. Un code Direct 0.7 comprenant le service
+L'autre personne l'ajoute avec son nom. Un code Murmur 0.7 comprenant le service
 Internet configure la connexion automatique aux lancements suivants.
 Les anciens codes restent utilisables sur le reseau local. Le mode Internet
 manuel reste disponible comme outil avance. Ne jamais publier les codes prives.
@@ -44,5 +44,5 @@ Certaines box necessitent un relais TURN. Aucun relais public n'est deploye.
 Le partage d'ecran reste a faire. Le logiciel n'a pas ete audite ni signe Authenticode.
 "@
 Set-Content -LiteralPath (Join-Path $packageRoot "LIRE-MOI.txt") -Value $readme -Encoding utf8
-Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $outputRoot "Direct-$version-Windows-x64.zip") -Force
-Write-Output "Package Direct $version ready."
+Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $outputRoot "Murmur-$version-Windows-x64.zip") -Force
+Write-Output "Package Murmur $version ready."

@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include "murmur/voice.h"
 #include <juice/juice.h>
+#ifdef DIRECT_SCREEN_SHARE
+#include "screen.h"
+#endif
 #define QUEUE_SIZE 16
 static struct {
     HWND window;
@@ -23,7 +26,28 @@ static struct {
     uint8_t key[32];
     link_message out[QUEUE_SIZE], in[QUEUE_SIZE];
     unsigned out_head, out_count, in_head, in_count;
+    unsigned level_self, level_peer;   /* 0..100, see murmur_voice_levels */
 } transport;
+/* Publishes who is speaking. The page is told only when a level moved enough to matter, so a quiet
+   call costs no wake-ups; a missing voice (call ended) reads as silence. */
+static void publish_levels(murmur_voice *voice) {
+    unsigned self = 0, peer = 0, old_self, old_peer;
+    int moved;
+    if (voice) murmur_voice_levels(voice, GetTickCount64(), &self, &peer);
+    EnterCriticalSection(&transport.lock);
+    old_self = transport.level_self; old_peer = transport.level_peer;
+    moved = (self > old_self ? self - old_self : old_self - self) >= 8 || (peer > old_peer ? peer - old_peer : old_peer - peer) >= 8 ||
+            (self == 0) != (old_self == 0) || (peer == 0) != (old_peer == 0);
+    if (moved) { transport.level_self = self; transport.level_peer = peer; }
+    LeaveCriticalSection(&transport.lock);
+    if (moved) PostMessageW(transport.window, WM_MURMUR_LEVELS, 0, 0);
+}
+void link_voice_levels(unsigned *self, unsigned *peer) {
+    EnterCriticalSection(&transport.lock);
+    if (self) *self = transport.level_self;
+    if (peer) *peer = transport.level_peer;
+    LeaveCriticalSection(&transport.lock);
+}
 static void voice_status(int state) {
     int changed;
     EnterCriticalSection(&transport.lock);
@@ -51,6 +75,7 @@ static murmur_voice *configured_voice(int hardware) {
 static void apply_volume(murmur_voice *voice) {
     EnterCriticalSection(&transport.lock);
     murmur_voice_volume(voice,transport.audio.input_volume,transport.audio.output_volume);
+    murmur_voice_options(voice,transport.audio.echo,transport.audio.noise,transport.audio.agc,transport.audio.gate);
     LeaveCriticalSection(&transport.lock);
 }
 static void voice_failed(void) {
@@ -153,7 +178,7 @@ static DWORD WINAPI run_ice(void *unused) {
         }
         SecureZeroMemory(&message, sizeof(message));
         if (!(local_voice & 1) || !(remote_voice & 1)) {
-            murmur_voice_free(voice); voice = NULL;
+            murmur_voice_free(voice); voice = NULL; publish_levels(NULL);
             if (local_voice) voice_status(1); else if (link_voice_state() != 5) voice_status(0);
         } else {
             uint8_t packet[MURMUR_VOICE_PACKET];
@@ -188,14 +213,22 @@ static DWORD WINAPI run_ice(void *unused) {
         }
         if (voice) {
             murmur_voice_stats stats;
-            murmur_voice_pump(voice, GetTickCount64()); murmur_voice_get_stats(voice, &stats);
+            murmur_voice_pump(voice, GetTickCount64()); murmur_voice_get_stats(voice, &stats); publish_levels(voice);
             EnterCriticalSection(&transport.lock); transport.voice_decoded = stats.decoded; LeaveCriticalSection(&transport.lock);
         }
+#ifdef DIRECT_SCREEN_SHARE
+        screen_pump(peer,1);
+        wait = (voice || screen_sharing()) ? 5 : murmur_ice_wait_ms(peer, GetTickCount64());
+#else
         wait = voice ? 5 : murmur_ice_wait_ms(peer, GetTickCount64());
+#endif
         EnterCriticalSection(&transport.lock); got = transport.in_count < QUEUE_SIZE; LeaveCriticalSection(&transport.lock);
         if (got && murmur_ice_pending_message(peer)) wait = 0;
     }
-    murmur_voice_free(voice); murmur_ice_free(peer);
+#ifdef DIRECT_SCREEN_SHARE
+    screen_disconnect();
+#endif
+    murmur_voice_free(voice); publish_levels(NULL); murmur_ice_free(peer);
     EnterCriticalSection(&transport.lock);
     transport.voice_requested = transport.voice_muted = 0;
     SecureZeroMemory(transport.ice_output, sizeof(transport.ice_output));
@@ -273,7 +306,7 @@ static DWORD WINAPI run(void *unused) {
         }
         SecureZeroMemory(&message, sizeof(message));
         if (!(local_voice & 1) || !(remote_voice & 1)) {
-            murmur_voice_free(voice); voice = NULL;
+            murmur_voice_free(voice); voice = NULL; publish_levels(NULL);
             murmur_peer_free(media); media = NULL;
             if (local_voice) voice_status(1);
             else if (link_voice_state() != 5) voice_status(0);
@@ -292,7 +325,7 @@ static DWORD WINAPI run(void *unused) {
         state = murmur_peer_step(media, 0);
         if (state == MURMUR_PEER_FAILED || state == MURMUR_PEER_CLOSED ||
             (state != MURMUR_PEER_CONNECTED && GetTickCount64() - media_started > 15000)) {
-            murmur_voice_free(voice); voice = NULL;
+            murmur_voice_free(voice); voice = NULL; publish_levels(NULL);
             murmur_peer_free(media); media = NULL;
             voice_failed(); continue;
         }
@@ -331,7 +364,7 @@ static DWORD WINAPI run(void *unused) {
                 if (murmur_peer_step(media, 0) != MURMUR_PEER_CONNECTED) break;
             }
             SecureZeroMemory(packet, sizeof(packet));
-            murmur_voice_pump(voice, GetTickCount64());
+            murmur_voice_pump(voice, GetTickCount64()); publish_levels(voice);
             {
                 murmur_voice_stats stats;
                 murmur_voice_get_stats(voice, &stats);
@@ -339,7 +372,7 @@ static DWORD WINAPI run(void *unused) {
             }
         }
     }
-    murmur_voice_free(voice);
+    murmur_voice_free(voice); publish_levels(NULL);
     murmur_peer_free(media);
     murmur_peer_free(peer);
     SecureZeroMemory(media_key, sizeof(media_key));

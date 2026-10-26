@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "murmur-service",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-21",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "durable_objects": { "bindings": [{ "name": "GUILDS", "class_name": "GuildObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GuildObject"] }]
+}

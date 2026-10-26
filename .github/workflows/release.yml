@@ -49,14 +49,14 @@ jobs:
           $signingFile = Join-Path $env:RUNNER_TEMP 'direct-signing.pem'
           try {
             [IO.File]::WriteAllText($signingFile, $env:DIRECT_UPDATE_SIGNING_KEY)
-            python scripts/sign_update.py --version $version --exe build/Release/Direct.exe --key $signingFile --output out/release
+            python scripts/sign_update.py --version $version --exe build/Release/Murmur.exe --key $signingFile --output out/release
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           } finally {
             Remove-Item -LiteralPath $signingFile -ErrorAction SilentlyContinue
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Direct-Windows-x64
+          name: Murmur-Windows-x64
           path: |
             out/release/*.zip
             out/release/Direct-win-x64.*
@@ -72,5 +72,5 @@ jobs:
           if (!$notes.Success) { throw "Release notes missing for $version" }
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           [IO.File]::WriteAllText($notesPath, $notes.Groups[1].Value.Trim())
-          gh release create "$env:GITHUB_REF_NAME" --draft --verify-tag --title "Direct $env:GITHUB_REF_NAME" --notes-file $notesPath @assets
+          gh release create "$env:GITHUB_REF_NAME" --draft --verify-tag --title "Murmur $env:GITHUB_REF_NAME" --notes-file $notesPath @assets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

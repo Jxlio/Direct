@@ -1,5 +1,5 @@
 #include "updates.h"
-#include "panel_style.h"
+#include "datadir.h"
 #include "murmur/update.h"
 #include "direct_version.h"
 #include "link.h"
@@ -14,8 +14,7 @@
 #define JSMN_PARENT_LINKS
 #include "third_party/jsmn.h"
 static struct {
-    HWND parent, panel, status, notes, download;
-    HFONT font;
+    HWND parent;
     HANDLE worker;
     CRITICAL_SECTION lock;
     int busy, available, staged, install, closing;
@@ -46,7 +45,7 @@ static int fetch(const WCHAR *host, const WCHAR *path, size_t limit, uint8_t **o
     DWORD redirects = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP, disabled = WINHTTP_DISABLE_COOKIES;
     ULONGLONG started = GetTickCount64(); size_t used = 0; int result = -1;
     *out = NULL; *size = 0; *status = 0;
-    session = WinHttpOpen(L"Direct/" DIRECT_VERSION_W, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
+    session = WinHttpOpen(L"Murmur/" DIRECT_VERSION_W, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL, NULL, 0);
     if (!session) goto done;
     WinHttpSetTimeouts(session, 5000, 5000, 10000, 10000);
     connection = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0); if (!connection) goto done;
@@ -170,7 +169,7 @@ static DWORD WINAPI check(void *unused) {
     EnterCriticalSection(&updater.lock); updater.update=update; updater.available=direct_version_compare(update.version,current_version())>0; LeaveCriticalSection(&updater.lock);
     if (direct_version_compare(update.version,current_version())>0) {
         WCHAR text[256]; swprintf_s(text,256,L"Version %u.%u.%u disponible. Téléchargez-la pour l’installer à la fermeture.",update.version.major,update.version.minor,update.version.patch); state(text);
-    } else state(L"Direct est à jour.");
+    } else state(L"Murmur est à jour.");
 done:
     free(manifest); free(sig); history();
     EnterCriticalSection(&updater.lock); r=updater.available && !updater.closing; LeaveCriticalSection(&updater.lock);
@@ -195,7 +194,7 @@ static DWORD WINAPI download(void *unused) {
 done:
     free(manifest); free(sig); free(exe);
     EnterCriticalSection(&updater.lock); updater.staged=okay; updater.install=okay; updater.busy=0; LeaveCriticalSection(&updater.lock);
-    state(okay ? L"Mise à jour vérifiée. Elle sera installée lorsque vous quitterez Direct." : L"Téléchargement ou vérification impossible. Votre version actuelle est conservée."); return 0;
+    state(okay ? L"Mise à jour vérifiée. Elle sera installée lorsque vous quitterez Murmur." : L"Téléchargement ou vérification impossible. Votre version actuelle est conservée."); return 0;
 }
 static void start(int downloading) {
     EnterCriticalSection(&updater.lock);
@@ -203,74 +202,33 @@ static void start(int downloading) {
     if (updater.worker) { CloseHandle(updater.worker); updater.worker=NULL; }
     updater.busy=1; updater.worker=CreateThread(NULL,0,downloading?download:check,NULL,0,NULL);
     if (!updater.worker) updater.busy=0;
-    LeaveCriticalSection(&updater.lock); updates_refresh();
+    LeaveCriticalSection(&updater.lock);
 }
+void updates_web_snapshot(WCHAR status[512],int *available,int *busy) {
+    EnterCriticalSection(&updater.lock);
+    wcscpy_s(status,512,updater.message);
+    *available=updater.available && !updater.staged;
+    *busy=updater.busy || updater.staged;
+    LeaveCriticalSection(&updater.lock);
+}
+void updates_web_check(void) { start(0); }
+void updates_web_download(void) { start(1); }
 void updates_init(HWND parent) {
     WCHAR base[MAX_PATH], folder[MAX_PATH];
     InitializeCriticalSection(&updater.lock); updater.parent=parent;
     wcscpy_s(updater.message,512,L"Vérification des mises à jour…");
-    if (embedded_text(3,updater.history,32768)) wcscpy_s(updater.history,32768,L"Direct " DIRECT_VERSION_W);
-    if (SUCCEEDED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,SHGFP_TYPE_CURRENT,base)) && !child_path(folder,base,L"Murmur")) {
+    if (embedded_text(3,updater.history,32768)) wcscpy_s(updater.history,32768,L"Murmur " DIRECT_VERSION_W);
+    if (SUCCEEDED(murmur_local_appdata(base)) && !child_path(folder,base,L"Murmur")) {
         CreateDirectoryW(folder,NULL); if (!child_path(updater.folder,folder,L"updates")) CreateDirectoryW(updater.folder,NULL);
     }
     start(0);
 }
-void updates_refresh(void) {
-    if (!updater.panel) return;
-    EnterCriticalSection(&updater.lock);
-    SetWindowTextW(updater.status,updater.message); SetWindowTextW(updater.notes,updater.history);
-    EnableWindow(updater.download,updater.available && !updater.busy && !updater.staged);
-    EnableWindow(GetDlgItem(updater.panel,601),!updater.busy && !updater.staged);
-    LeaveCriticalSection(&updater.lock);
-}
-static LRESULT CALLBACK panel_proc(HWND window,UINT message,WPARAM wp,LPARAM lp) {
-    switch (message) {
-    case WM_COMMAND:
-        if (HIWORD(wp)==BN_CLICKED) switch (LOWORD(wp)) {
-        case 601: start(0); break;
-        case 602: start(1); break;
-        case 603: ShellExecuteW(window,L"open",L"https://github.com/Jxlio/Direct/releases",NULL,NULL,SW_SHOWNORMAL); break;
-        case 604: {
-            WCHAR *licenses=(WCHAR *)calloc(131072,sizeof(WCHAR));
-            if (licenses && !embedded_text(2,licenses,131072)) SetWindowTextW(updater.notes,licenses);
-            free(licenses); break;
-        }
-        } return 0;
-    case WM_CTLCOLORSTATIC:
-    case WM_CTLCOLOREDIT: return direct_panel_color(message,wp,lp);
-    case WM_DRAWITEM: return direct_panel_button((DRAWITEMSTRUCT *)lp,updater.font);
-    case WM_CLOSE: DestroyWindow(window); return 0;
-    case WM_DESTROY: updater.panel=NULL; DeleteObject(updater.font); updater.font=NULL; return 0;
-    default: return DefWindowProcW(window,message,wp,lp);
-    }
-}
-void updates_show(HWND parent) {
-    WNDCLASSW wc={0}; HWND title,check_button,web;
-    if (updater.panel) { SetForegroundWindow(updater.panel); return; }
-    wc.lpfnWndProc=panel_proc; wc.hInstance=GetModuleHandleW(NULL); wc.lpszClassName=L"DirectUpdates";
-    wc.hCursor=LoadCursorW(NULL,IDC_ARROW); wc.hbrBackground=(HBRUSH)GetStockObject(WHITE_BRUSH); RegisterClassW(&wc);
-    updater.panel=CreateWindowExW(WS_EX_CONTROLPARENT,wc.lpszClassName,L"Direct — Versions et mises à jour",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,704,690,parent,NULL,wc.hInstance,NULL);
-    if (!updater.panel) return;
-    updater.font=CreateFontW(-15,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
-    title=CreateWindowW(L"STATIC",L"Direct " DIRECT_VERSION_W L" · Historique des versions",WS_CHILD|WS_VISIBLE,24,24,640,26,updater.panel,NULL,NULL,NULL);
-    updater.status=CreateWindowW(L"STATIC",L"",WS_CHILD|WS_VISIBLE,24,66,640,52,updater.panel,NULL,NULL,NULL);
-    check_button=CreateWindowW(L"BUTTON",L"Vérifier maintenant",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,24,132,204,38,updater.panel,(HMENU)601,NULL,NULL);
-    updater.download=CreateWindowW(L"BUTTON",L"Télécharger la mise à jour",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,248,132,240,38,updater.panel,(HMENU)602,NULL,NULL);
-    web=CreateWindowW(L"BUTTON",L"GitHub Releases",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,508,132,152,38,updater.panel,(HMENU)603,NULL,NULL);
-    updater.notes=CreateWindowW(L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_READONLY|WS_VSCROLL,24,192,636,420,updater.panel,NULL,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Licences intégrées",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,24,620,204,28,updater.panel,(HMENU)604,NULL,NULL);
-    SendMessageW(updater.notes,EM_SETLIMITTEXT,130000,0);
-    { HWND controls[]={title,updater.status,check_button,updater.download,web,updater.notes}; unsigned i;
-      for (i=0;i<sizeof(controls)/sizeof(controls[0]);++i) SendMessageW(controls[i],WM_SETFONT,(WPARAM)updater.font,TRUE); }
-    updates_refresh(); ShowWindow(updater.panel,SW_SHOW);
-}
-int updates_translate(MSG *message) { return updater.panel && IsDialogMessageW(updater.panel,message); }
 void updates_shutdown(void) {
     WCHAR executable[MAX_PATH],helper[MAX_PATH],command[MAX_PATH*3],runtime[MAX_PATH],runtime_copy[MAX_PATH],*slash; int install;
     EnterCriticalSection(&updater.lock); updater.closing=1; install=updater.install && updater.staged; LeaveCriticalSection(&updater.lock);
     if (!install) return;
     if (!GetModuleFileNameW(NULL,executable,MAX_PATH) || child_path(helper,updater.folder,L"helper.exe") || !CopyFileW(executable,helper,FALSE)) {
-        MessageBoxW(NULL,L"La mise à jour n’a pas pu démarrer. La version actuelle est conservée.",L"Direct · Mise à jour",MB_OK|MB_ICONWARNING); return;
+        MessageBoxW(NULL,L"La mise à jour n’a pas pu démarrer. La version actuelle est conservée.",L"Murmur · Mise à jour",MB_OK|MB_ICONWARNING); return;
     }
     /* A portable installation may have no VC runtime installed system-wide. */
     wcscpy_s(runtime,MAX_PATH,executable); slash=wcsrchr(runtime,L'\\');
@@ -278,12 +236,12 @@ void updates_shutdown(void) {
     *slash=0;
     if (wcscat_s(runtime,MAX_PATH,L"\\vcruntime140.dll") || child_path(runtime_copy,updater.folder,L"vcruntime140.dll")) return;
     if (GetFileAttributesW(runtime)!=INVALID_FILE_ATTRIBUTES && !CopyFileW(runtime,runtime_copy,FALSE)) {
-        MessageBoxW(NULL,L"L’assistant de mise à jour n’a pas pu être préparé. La version actuelle est conservée.",L"Direct · Mise à jour",MB_OK|MB_ICONWARNING); return;
+        MessageBoxW(NULL,L"L’assistant de mise à jour n’a pas pu être préparé. La version actuelle est conservée.",L"Murmur · Mise à jour",MB_OK|MB_ICONWARNING); return;
     }
     swprintf_s(command,MAX_PATH*3,L"\"%ls\" --direct-apply-update %lu \"%ls\" \"%ls\"",helper,GetCurrentProcessId(),executable,updater.folder);
     { STARTUPINFOW si={0}; PROCESS_INFORMATION pi={0}; si.cb=sizeof(si);
       if (CreateProcessW(helper,command,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&si,&pi)) { CloseHandle(pi.hThread); CloseHandle(pi.hProcess); }
-      else MessageBoxW(NULL,L"L’installation n’a pas pu démarrer. La version actuelle reste disponible.",L"Direct · Mise à jour",MB_OK|MB_ICONWARNING); }
+      else MessageBoxW(NULL,L"L’installation n’a pas pu démarrer. La version actuelle reste disponible.",L"Murmur · Mise à jour",MB_OK|MB_ICONWARNING); }
 }
 int updates_apply_command(void) {
     int argc; WCHAR **args=CommandLineToArgvW(GetCommandLineW(),&argc), *end;
@@ -310,7 +268,7 @@ int updates_apply_command(void) {
 done:
     free(manifest); free(sig); free(data);
 #ifndef DIRECT_UPDATER_TEST
-    if (!okay) MessageBoxW(NULL,L"La mise à jour n’a pas pu être installée. Votre exécutable actuel est conservé.",L"Direct · Mise à jour",MB_OK|MB_ICONWARNING);
+    if (!okay) MessageBoxW(NULL,L"La mise à jour n’a pas pu être installée. Votre exécutable actuel est conservé.",L"Murmur · Mise à jour",MB_OK|MB_ICONWARNING);
 #else
     (void)okay;
 #endif

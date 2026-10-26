@@ -1,7 +1,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "friends.h"
-#include "connect.h"
+#include "datadir.h"
 #include "link.h"
 #include "signaling.h"
 #include "murmur/friend.h"
@@ -12,11 +12,7 @@
 #include <wchar.h>
 static friend_book book;
 static WCHAR path[MAX_PATH];
-static HWND panel, list, name_edit, code_edit, status, ticker;
-static HFONT font, title_font, small_font;
-static HBRUSH background_brush, input_brush;
-static UINT panel_dpi = 96;
-static int scaled(int n) { return MulDiv(n, (int)panel_dpi, 96); }
+static HWND ticker;
 static SOCKET discovery = INVALID_SOCKET;
 static int selected = -1, enabled, responder_started, answer_received, winsock_ready;
 static int sandbox;
@@ -57,7 +53,7 @@ static void internet_tick(void) {
     if(signal_state()==0 && book.count && !internet_paused) signal_start(&internet_service,&book);
     if(signal_state()!=2) {
         memset(online,0,sizeof(online));
-        if(!link_busy()) notice=signal_state()==4?L"Connexion automatique suspendue. Gardez une seule instance normale de Direct ouverte, puis relancez-la.":signal_state()==3?L"Mise en relation indisponible. Nouvelle tentative automatique…":L"Connexion au service de mise en relation…";
+        if(!link_busy()) notice=signal_state()==4?L"Connexion automatique suspendue. Gardez une seule instance normale de Murmur ouverte, puis relancez-la.":signal_state()==3?L"Mise en relation indisponible. Nouvelle tentative automatique…":L"Connexion au service de mise en relation…";
     }
     while(signal_receive(&frame)) {
         uint8_t route[32],challenge[32]; char token[6000]; unsigned role;
@@ -105,23 +101,7 @@ int friends_auto_connecting(void) { return internet_enabled && active_friend>=0 
 int friends_peer_id(uint8_t route[32]) { return active_friend>=0 && (DWORD)active_friend<book.count && link_state()==2 && !direct_friend_route(book.items[active_friend].secret,route); }
 const WCHAR *friends_peer_name(void) { return link_state()==2 && active_friend>=0 && (DWORD)active_friend<book.count?book.items[active_friend].name:link_state()==2 && connected_name[0]?connected_name:NULL; }
 static void refresh(void) {
-    DWORD i; LRESULT selection;
-    if (!panel) return;
-    selection = SendMessageW(list, LB_GETCURSEL, 0, 0);
-    SendMessageW(list, LB_RESETCONTENT, 0, 0);
-    for (i = 0; i < book.count; ++i) SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)book.items[i].name);
-    if (selection != LB_ERR) SendMessageW(list, LB_SETCURSEL, (WPARAM)selection, 0);
-    EnableWindow(GetDlgItem(panel, 502), !sandbox && selection != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
-    EnableWindow(GetDlgItem(panel, 509), selection != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
-    SetWindowTextW(status, notice);
-    SetWindowTextW(GetDlgItem(panel,502),internet_enabled?L"Reconnexion automatique":L"Connecter sur ce réseau");
-    if (sandbox) {
-        SetWindowTextW(status,link_state()==2 ? L"Ami de test connecté. Messages réels chiffrés ; appel simulé, sans accès au microphone." : L"Connexion du second client local en cours. Aucun contact personnel n’est modifié.");
-        EnableWindow(GetDlgItem(panel,506),FALSE); EnableWindow(GetDlgItem(panel,507),FALSE);
-        EnableWindow(GetDlgItem(panel,508),FALSE); EnableWindow(GetDlgItem(panel,509),FALSE);
-    }
-    ShowWindow(list, book.count ? SW_SHOWNA : SW_HIDE);
-    InvalidateRect(panel, NULL, FALSE);
+    if (main_window) PostMessageW(main_window, WM_APP + 34, 0, 0);
 }
 static void stop_discovery(void) {
     if (ticker) KillTimer(ticker, 1);
@@ -192,18 +172,20 @@ static void connect_friend(int index) {
 fail:
     stop_discovery(); notice = L"Découverte indisponible. Vérifiez qu’une autre instance de Murmur n’utilise pas déjà ce PC."; refresh();
 }
-static void add_friend(int create) {
-    saved_friend item = {0}; WCHAR wide[DIRECT_INVITE_MAX]; char code[DIRECT_INVITE_MAX]; DWORD i; direct_service received_service={0};
+static int add_friend_impl(int create, const WCHAR *name, const WCHAR *invitation, WCHAR *generated) {
+    saved_friend item = {0}; WCHAR wide[DIRECT_INVITE_MAX]; char code[DIRECT_INVITE_MAX]; DWORD i; direct_service received_service={0}; int result=-1;
     if (!enabled || book.count >= 16 || discovery != INVALID_SOCKET || link_busy() || active_friend>=0) {
-        notice = L"Ajout indisponible : arrêtez la connexion en cours, ou vérifiez le stockage (16 amis maximum)."; refresh(); return;
+        notice = L"Ajout indisponible : arrêtez la connexion en cours, ou vérifiez le stockage (16 amis maximum)."; refresh(); return -1;
     }
-    GetWindowTextW(name_edit, item.name, 64);
-    if (!item.name[0]) { notice = L"Choisissez d’abord un nom pour cet ami."; refresh(); return; }
+    if (!name || wcslen(name)>=64) { notice=L"Nom trop long."; refresh(); return -1; }
+    wcscpy_s(item.name,64,name);
+    if (!item.name[0]) { notice = L"Choisissez d’abord un nom pour cet ami."; refresh(); return -1; }
     if (create) {
-        if (murmur_random_key(item.secret)) return;
+        if (murmur_random_key(item.secret)) { notice=L"Impossible de créer une clé pour cet ami."; goto done; }
         if(direct_invite_create(item.secret,&internet_service,code)) goto done; item.offerer = 1;
     } else {
-        GetWindowTextW(code_edit, wide, DIRECT_INVITE_MAX);
+        if (!invitation || wcslen(invitation)>=DIRECT_INVITE_MAX) { notice=L"Code ami invalide."; goto done; }
+        wcscpy_s(wide,DIRECT_INVITE_MAX,invitation);
         if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, code, sizeof(code), NULL, NULL) ||
             direct_invite_parse(code, item.secret,&received_service)) {
             notice = L"Code ami invalide. Collez le code complet reçu en privé."; goto done;
@@ -223,150 +205,20 @@ static void add_friend(int create) {
         notice = L"Impossible d’enregistrer cet ami. Aucun ajout effectué."; goto done;
     }
     if (create) {
-        MultiByteToWideChar(CP_UTF8, 0, code, -1, wide, DIRECT_INVITE_MAX); SetWindowTextW(code_edit, wide);
+        MultiByteToWideChar(CP_UTF8, 0, code, -1, wide, DIRECT_INVITE_MAX);
+        if (generated) wcscpy_s(generated,DIRECT_INVITE_MAX,wide);
         notice = L"Ami enregistré. Envoyez ce code une seule fois, en privé, à cette personne uniquement.";
-    } else { SetWindowTextW(code_edit, L""); notice = L"Ami enregistré. Vous pouvez maintenant vous retrouver sans échanger de nouveaux codes."; }
+    } else notice = L"Ami enregistré. Vous pouvez maintenant vous retrouver sans échanger de nouveaux codes.";
+    result=0;
 done:
     internet_start(); SecureZeroMemory(&received_service,sizeof(received_service));
     SecureZeroMemory(&item, sizeof(item)); SecureZeroMemory(code, sizeof(code)); SecureZeroMemory(wide, sizeof(wide)); refresh();
-}
-static HWND control(HWND window, const WCHAR *kind, const WCHAR *text, DWORD style, int x, int y, int w, int h, int id) {
-    HWND child;
-    if (!wcscmp(kind, L"BUTTON")) style |= BS_OWNERDRAW;
-    child = CreateWindowExW(0, kind, text,
-        WS_CHILD | WS_VISIBLE | style, scaled(x), scaled(y), scaled(w), scaled(h), window, (HMENU)(INT_PTR)id, GetModuleHandleW(NULL), NULL);
-    SendMessageW(child, WM_SETFONT, (WPARAM)font, TRUE); return child;
-}
-static void panel_label(HDC dc, const WCHAR *text, int x, int y, int w, int h, HFONT face, COLORREF color) {
-    RECT r = {scaled(x), scaled(y), scaled(x+w), scaled(y+h)};
-    HGDIOBJ old = SelectObject(dc, face); SetTextColor(dc, color); SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, text, -1, &r, DT_WORDBREAK | DT_NOPREFIX); SelectObject(dc, old);
-}
-static void panel_round(HDC dc, RECT rect, COLORREF color) {
-    HBRUSH brush = CreateSolidBrush(color); HGDIOBJ old = SelectObject(dc, brush);
-    HGDIOBJ pen = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, scaled(12), scaled(12));
-    SelectObject(dc, pen); SelectObject(dc, old); DeleteObject(brush);
-}
-static LRESULT CALLBACK proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
-    switch (message) {
-    case WM_TIMER: tick(); return 0;
-    case WM_CREATE:
-        panel_dpi = GetDpiForWindow(window);
-        background_brush = CreateSolidBrush(RGB(255, 255, 255)); input_brush = CreateSolidBrush(RGB(242, 245, 250));
-        font = CreateFontW(-scaled(14), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        title_font = CreateFontW(-scaled(28), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        small_font = CreateFontW(-scaled(12), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        list = control(window, L"LISTBOX", L"", WS_TABSTOP | LBS_NOTIFY | WS_VSCROLL | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS, 28, 132, 244, 238, 501);
-        SendMessageW(list, LB_SETITEMHEIGHT, 0, scaled(58));
-        control(window, L"BUTTON", internet_enabled?L"Reconnexion automatique":L"Connecter sur ce réseau", WS_TABSTOP, 28, 390, 244, 42, 502);
-        control(window, L"BUTTON", L"Annuler la connexion", WS_TABSTOP, 28, 442, 244, 34, 503);
-        control(window, L"BUTTON", L"Oublier cet ami", WS_TABSTOP, 28, 484, 244, 30, 509);
-        name_edit = control(window, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 332, 164, 340, 27, 504);
-        SendMessageW(name_edit, EM_SETLIMITTEXT, 63, 0);
-        SendMessageW(name_edit, EM_SETCUEBANNER, TRUE, (LPARAM)L"Nom de votre ami");
-        control(window, L"BUTTON", L"Créer un code ami", WS_TABSTOP, 320, 212, 364, 42, 506);
-        code_edit = control(window, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 332, 316, 340, 27, 505);
-        SendMessageW(code_edit, EM_SETLIMITTEXT, DIRECT_INVITE_MAX-1, 0);
-        SendMessageW(code_edit, EM_SETCUEBANNER, TRUE, (LPARAM)L"Collez le code reçu ici");
-        control(window, L"BUTTON", L"Ajouter avec ce code", WS_TABSTOP, 320, 366, 364, 40, 507);
-        status = control(window, L"STATIC", L"", 0, 32, 548, 648, 46, 520);
-        SendMessageW(status, WM_SETFONT, (WPARAM)small_font, TRUE);
-        control(window, L"BUTTON", L"Connexion Internet…", WS_TABSTOP, 464, 608, 220, 32, 508);
-        return 0;
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: {
-        PAINTSTRUCT ps; HDC dc = BeginPaint(window, &ps); RECT r;
-        GetClientRect(window, &r); FillRect(dc, &r, background_brush);
-        panel_label(dc, L"Amis et connexions", 28, 24, 656, 44, title_font, RGB(24, 34, 52));
-        panel_label(dc, L"Enregistrez un ami ou connectez-vous pour discuter et appeler.", 30, 74, 650, 24, font, RGB(104, 116, 137));
-        panel_label(dc, L"VOS AMIS", 28, 110, 244, 20, small_font, RGB(58, 103, 244));
-        panel_label(dc, L"AJOUTER UN AMI", 320, 110, 364, 20, small_font, RGB(58, 103, 244));
-        panel_label(dc, L"Nom de l’ami", 320, 136, 364, 22, small_font, RGB(104, 116, 137));
-        { RECT field = {scaled(320), scaled(156), scaled(684), scaled(199)}; panel_round(dc, field, RGB(242, 245, 250)); }
-        { RECT field = {scaled(320), scaled(308), scaled(684), scaled(351)}; panel_round(dc, field, RGB(242, 245, 250)); }
-        panel_label(dc, L"CODE AMI REÇU OU CRÉÉ", 320, 280, 364, 22, small_font, RGB(104, 116, 137));
-        panel_label(dc, L"Le code est privé. Partagez-le uniquement avec cet ami.\nAprès création, il apparaît dans le champ ci-dessus.", 320, 430, 364, 60, small_font, RGB(104, 116, 137));
-        if (!book.count) {
-            panel_label(dc, L"Aucun ami\nenregistré", 40, 176, 210, 72, title_font, RGB(24, 34, 52));
-            panel_label(dc, L"Ajoutez votre premier ami\navec une invitation privée.", 40, 272, 210, 60, font, RGB(104, 116, 137));
-        }
-        panel_label(dc, internet_enabled?L"Connexion automatique entre amis enregistrés.\nLes réseaux bloquant le P2P peuvent rester incompatibles.":L"Sans service configuré : connexion sur le réseau local.\nUn code Direct récent configure Internet automatiquement.", 30, 608, 420, 44, small_font, RGB(104, 116, 137));
-        EndPaint(window, &ps); return 0;
-    }
-    case WM_CTLCOLORSTATIC:
-        SetTextColor((HDC)wp, RGB(104, 116, 137)); SetBkColor((HDC)wp, RGB(255, 255, 255)); return (LRESULT)background_brush;
-    case WM_CTLCOLOREDIT:
-    case WM_CTLCOLORLISTBOX:
-        SetTextColor((HDC)wp, RGB(24, 34, 52)); SetBkColor((HDC)wp, RGB(242, 245, 250)); return (LRESULT)input_brush;
-    case WM_MEASUREITEM: ((MEASUREITEMSTRUCT *)lp)->itemHeight = (UINT)scaled(58); return TRUE;
-    case WM_DRAWITEM: {
-        DRAWITEMSTRUCT *item = (DRAWITEMSTRUCT *)lp; RECT r = item->rcItem; WCHAR text[96]; HGDIOBJ old;
-        int primary = item->CtlID == 502 || item->CtlID == 506;
-        int chosen = (item->itemState & ODS_SELECTED) != 0;
-        int disabled = (item->itemState & ODS_DISABLED) != 0;
-        FillRect(item->hDC, &r, background_brush);
-        if (item->CtlID == 501) {
-            if (item->itemID == (UINT)-1 || item->itemID >= book.count) return TRUE;
-            panel_round(item->hDC, r, chosen ? RGB(228, 236, 255) : RGB(246, 248, 252));
-            r.left += scaled(14); r.top += scaled(8);
-            old = SelectObject(item->hDC, font); SetBkMode(item->hDC, TRANSPARENT); SetTextColor(item->hDC, RGB(24, 34, 52));
-            DrawTextW(item->hDC, book.items[item->itemID].name, -1, &r, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            r.top += scaled(24); SelectObject(item->hDC, small_font); SetTextColor(item->hDC, RGB(104, 116, 137));
-            DrawTextW(item->hDC, sandbox ? (link_state()==2 ? L"En ligne · test local" : L"Connexion de test…") : internet_enabled ? (online[item->itemID]?L"Disponible sur Internet":L"En attente de votre ami") : L"Ami enregistré", -1, &r, DT_SINGLELINE); SelectObject(item->hDC, old);
-        } else {
-            panel_round(item->hDC, r, disabled ? RGB(242, 245, 250) : primary ? (chosen ? RGB(43, 83, 210) : RGB(58, 103, 244)) : chosen ? RGB(221, 230, 247) : RGB(242, 245, 250));
-            GetWindowTextW(item->hwndItem, text, 96); old = SelectObject(item->hDC, font);
-            SetBkMode(item->hDC, TRANSPARENT); SetTextColor(item->hDC, disabled ? RGB(133, 145, 164) : primary ? RGB(255, 255, 255) : RGB(58, 73, 98));
-            DrawTextW(item->hDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX); SelectObject(item->hDC, old);
-        }
-        if (item->itemState & ODS_FOCUS) { r = item->rcItem; InflateRect(&r, -scaled(3), -scaled(3)); DrawFocusRect(item->hDC, &r); }
-        return TRUE;
-    }
-    case WM_COMMAND:
-        if (LOWORD(wp) == 501 && HIWORD(wp) == LBN_SELCHANGE) {
-            LRESULT index = SendMessageW(list, LB_GETCURSEL, 0, 0);
-            if (index >= 0 && (DWORD)index < book.count && book.items[index].offerer) {
-                char code[DIRECT_INVITE_MAX]; WCHAR wide[DIRECT_INVITE_MAX];
-                direct_invite_create(book.items[index].secret,&internet_service,code);
-                MultiByteToWideChar(CP_UTF8, 0, code, -1, wide, DIRECT_INVITE_MAX);
-                SetWindowTextW(code_edit, wide);
-                SecureZeroMemory(code, sizeof(code)); SecureZeroMemory(wide, sizeof(wide));
-            } else SetWindowTextW(code_edit, L"");
-            EnableWindow(GetDlgItem(window, 502), !sandbox && index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
-            EnableWindow(GetDlgItem(window, 509), !sandbox && index != LB_ERR && !link_busy() && discovery == INVALID_SOCKET);
-        }
-        if (HIWORD(wp) == BN_CLICKED) switch (LOWORD(wp)) {
-        case 502:
-            if(internet_enabled) { internet_paused=0; memset(retry_at,0,sizeof(retry_at)); internet_tick(); notice=L"Reconnexion automatique activée."; refresh(); }
-            else connect_friend((int)SendMessageW(list, LB_GETCURSEL, 0, 0)); break;
-        case 503: internet_paused=1; active_friend=-1; stop_discovery(); link_stop(); notice = L"Connexion arrêtée."; refresh(); break;
-        case 506: add_friend(1); break;
-        case 507: add_friend(0); break;
-        case 508: connection_auto_show(window); break;
-        case 509: {
-            LRESULT index = SendMessageW(list, LB_GETCURSEL, 0, 0);
-            if (enabled && index >= 0 && (DWORD)index < book.count && !link_busy() && active_friend<0 && discovery == INVALID_SOCKET) {
-                friend_book updated = book;
-                memmove(&updated.items[index], &updated.items[index+1], (updated.count-(DWORD)index-1)*sizeof(saved_friend));
-                SecureZeroMemory(&updated.items[--updated.count], sizeof(saved_friend));
-                if (!friend_book_save(path, &updated)) { book = updated; if(internet_enabled) { if(book.count) signal_subscribe(&book); else signal_stop(); } notice = L"Ami oublié. Son ancien code ne permet plus de vous retrouver sur ce PC."; }
-                else notice = L"Impossible d’enregistrer la suppression.";
-                SecureZeroMemory(&updated, sizeof(updated)); refresh();
-            }
-            break;
-        }
-        } return 0;
-    case WM_CLOSE: DestroyWindow(window); return 0;
-    case WM_DESTROY: if (window == panel) { panel = NULL; DeleteObject(font); DeleteObject(title_font); DeleteObject(small_font); DeleteObject(background_brush); DeleteObject(input_brush); } return 0;
-    default: return DefWindowProcW(window, message, wp, lp);
-    }
+    return result;
 }
 void friends_init(HWND parent) {
     WNDCLASSW wc = {0}; WSADATA data;
-    wc.lpfnWndProc = proc; wc.hInstance = GetModuleHandleW(NULL); wc.lpszClassName = L"MurmurFriends";
-    wc.hCursor = LoadCursorW(NULL, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1); RegisterClassW(&wc);
-    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, path)) && wcslen(path)+24 < MAX_PATH) {
+    wc.hInstance = GetModuleHandleW(NULL);
+    if (SUCCEEDED(murmur_local_appdata(path)) && wcslen(path)+24 < MAX_PATH) {
         wcscat_s(path, MAX_PATH, L"\\Murmur");
         if (CreateDirectoryW(path, NULL) || GetLastError() == ERROR_ALREADY_EXISTS) {
             wcscat_s(path, MAX_PATH, L"\\friends.dat"); enabled = !friend_book_load(path, &book);
@@ -375,17 +227,14 @@ void friends_init(HWND parent) {
     if (!enabled) notice = L"Stockage des amis inaccessible ou endommagé. Le fichier existant a été conservé.";
     if (!WSAStartup(MAKEWORD(2, 2), &data)) {
         winsock_ready = 1;
-        /* A separate class avoids creating controls for the message-only timer window. */
-        wc.lpszClassName = L"MurmurFriendTicker"; wc.lpfnWndProc = DefWindowProcW; RegisterClassW(&wc);
+                wc.lpszClassName = L"MurmurFriendTicker"; wc.lpfnWndProc = DefWindowProcW; RegisterClassW(&wc);
         ticker = CreateWindowW(wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, wc.hInstance, NULL);
     }
     main_window=parent; signal_init(parent);
     if(signal_profile_load(&internet_service)>0) { internet_enabled=1; notice=L"Service Internet prêt. Créez un code ami et partagez-le une seule fois en privé."; internet_start(); }
 }
 void friends_init_test(HWND parent,const WCHAR *peer) {
-    WNDCLASSW wc={0}; (void)parent;
-    wc.lpfnWndProc=proc; wc.hInstance=GetModuleHandleW(NULL); wc.lpszClassName=L"MurmurFriends";
-    wc.hCursor=LoadCursorW(NULL,IDC_ARROW); wc.hbrBackground=(HBRUSH)GetStockObject(WHITE_BRUSH); RegisterClassW(&wc);
+    main_window=parent;
     sandbox=1; enabled=0; book.version=book.count=1;
     wcscpy_s(book.items[0].name,64,peer);
     notice=L"Test local : contact temporaire, sans modification de votre liste d’amis.";
@@ -394,20 +243,7 @@ void friends_connection_refresh(void) { if(!sandbox && link_state()!=2) connecte
 /* Timer messages are dispatched by the main loop, even when the panel is closed. */
 int friends_translate(MSG *message) {
     if (message->hwnd == ticker && message->message == WM_TIMER) { if(message->wParam==2) internet_tick(); else tick(); return 1; }
-    return panel && IsDialogMessageW(panel, message);
-}
-void friends_show(HWND parent) {
-    RECT owner; int x, y; BOOL dark = FALSE; COLORREF caption = RGB(255, 255, 255);
-    if (panel) { SetForegroundWindow(panel); return; }
-    panel_dpi = GetDpiForWindow(parent); GetWindowRect(parent, &owner);
-    x = owner.left + ((owner.right-owner.left)-scaled(732))/2;
-    y = owner.top + ((owner.bottom-owner.top)-scaled(704))/2;
-    panel = CreateWindowExW(WS_EX_CONTROLPARENT, L"MurmurFriends", L"Direct — Amis et connexions",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, scaled(732), scaled(704),
-        parent, NULL, GetModuleHandleW(NULL), NULL);
-    DwmSetWindowAttribute(panel, 20, &dark, sizeof(dark));
-    DwmSetWindowAttribute(panel, 35, &caption, sizeof(caption));
-    refresh(); ShowWindow(panel, SW_SHOW);
+    return 0;
 }
 void friends_close(void) {
     if(!sandbox && main_window) signal_stop();
@@ -415,6 +251,39 @@ void friends_close(void) {
     ticker = NULL;
     if (winsock_ready) { WSACleanup(); winsock_ready = 0; }
     SecureZeroMemory(&book, sizeof(book));
+}
+unsigned friends_web_count(void) { return book.count; }
+const WCHAR *friends_web_name(unsigned index) { return index<book.count?book.items[index].name:L""; }
+int friends_web_online(unsigned index) { return index<book.count && (sandbox ? link_state()==2 : online[index]!=0); }
+const WCHAR *friends_web_notice(void) { return notice; }
+int friends_web_internet_enabled(void) { return internet_enabled; }
+int friends_web_create(const WCHAR *name,WCHAR code[512]) { return add_friend_impl(1,name,NULL,code); }
+int friends_web_add(const WCHAR *name,const WCHAR *code) { return add_friend_impl(0,name,code,NULL); }
+int friends_web_code(unsigned index,WCHAR code[512]) {
+    char utf8[DIRECT_INVITE_MAX]; int result=-1;
+    if(index<book.count && book.items[index].offerer && !direct_invite_create(book.items[index].secret,&internet_service,utf8) &&
+        MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,utf8,-1,code,DIRECT_INVITE_MAX)) result=0;
+    SecureZeroMemory(utf8,sizeof(utf8)); return result;
+}
+void friends_web_connect(unsigned index) {
+    if (sandbox || index>=book.count) return;
+    if (internet_enabled) { internet_paused=0; memset(retry_at,0,sizeof(retry_at)); internet_tick(); notice=L"Reconnexion automatique activée."; refresh(); }
+    else connect_friend((int)index);
+}
+void friends_web_disconnect(void) {
+    internet_paused=1; active_friend=-1; stop_discovery(); link_stop(); notice=L"Connexion arrêtée."; refresh();
+}
+int friends_web_forget(unsigned index) {
+    friend_book updated;
+    if (!enabled || index>=book.count || link_busy() || active_friend>=0 || discovery!=INVALID_SOCKET) return -1;
+    updated=book;
+    memmove(&updated.items[index],&updated.items[index+1],(updated.count-index-1)*sizeof(saved_friend));
+    SecureZeroMemory(&updated.items[--updated.count],sizeof(saved_friend));
+    if(friend_book_save(path,&updated)) { notice=L"Impossible d’enregistrer la suppression."; SecureZeroMemory(&updated,sizeof(updated)); refresh(); return -1; }
+    book=updated;
+    if(internet_enabled) { if(book.count) signal_subscribe(&book); else signal_stop(); }
+    notice=L"Ami oublié. Son ancien code ne permet plus de vous retrouver sur ce PC.";
+    SecureZeroMemory(&updated,sizeof(updated)); refresh(); return 0;
 }
 #ifdef MURMUR_FRIEND_DISCOVERY_TEST
 /* Uses the production discovery controller, with two loopback ports instead of

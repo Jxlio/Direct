@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; frame-src https://www.youtube-nocookie.com; connect-src 'self'; form-action 'none'; base-uri 'none'">
+  <title>Murmur</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="user.css" id="user-css">
+  <script src="theme.js"></script>
+  <script src="app.js" defer></script>
+  <script src="e2ee.js" defer></script>
+  <script src="events.js" defer></script>
+  <script src="server.js" defer></script>
+  <script src="voice.js" defer></script>
+  <script src="sounds.js" defer></script>
+  <script src="onboarding.js" defer></script>
+</head>
+<body>
+  <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><path d="M3 10v4M7.5 6v12M12 3v18M16.5 7v10M21 10v4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 2.5l8.2 4.7v9.6L12 21.5l-8.2-4.7V7.2z"/><circle cx="12" cy="12" r="3.1"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-network" viewBox="0 0 24 24"><circle cx="8.6" cy="12" r="5.6"/><circle cx="15.4" cy="12" r="5.6"/></symbol>
+    <symbol id="i-circles" viewBox="0 0 24 24"><circle cx="7" cy="7" r="3.6"/><circle cx="17" cy="7" r="3.6"/><circle cx="7" cy="17" r="3.6"/><circle cx="17" cy="17" r="3.6"/></symbol>
+    <symbol id="i-waves" viewBox="0 0 24 24"><path d="M3 10v4M7.5 6v12M12 3v18M16.5 7v10M21 10v4"/></symbol>
+    <symbol id="i-hex" viewBox="0 0 24 24"><path d="M12 2.5l8.2 4.7v9.6L12 21.5l-8.2-4.7V7.2z"/><circle cx="12" cy="12" r="3.1"/></symbol>
+    <symbol id="i-direct" viewBox="0 0 24 24"><circle cx="8.6" cy="12" r="5.6"/><circle cx="15.4" cy="12" r="5.6"/></symbol>
+    <symbol id="logo-petals" viewBox="0 0 32 32"><rect x="2.5" y="4" width="15" height="23" rx="7.5" transform="rotate(-24 10 15.5)" fill="currentColor"/><rect x="15" y="8" width="14" height="20" rx="7" transform="rotate(-24 22 18)" fill="currentColor" opacity=".8"/></symbol>
+    <symbol id="logo-ripple" viewBox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="16" cy="16" rx="14" ry="9" transform="rotate(-18 16 16)"/><ellipse cx="16" cy="16" rx="10.5" ry="6.4" transform="rotate(-18 16 16)"/><ellipse cx="16" cy="16" rx="7" ry="3.9" transform="rotate(-18 16 16)"/></g><circle cx="16" cy="16" r="2.2" fill="currentColor"/></symbol>
+    <symbol id="logo-rings" viewBox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="16" cy="16" rx="13.5" ry="14"/><ellipse cx="16" cy="16" rx="9.6" ry="14"/><ellipse cx="16" cy="16" rx="5.4" ry="14"/><ellipse cx="16" cy="16" rx="1.8" ry="14"/></g></symbol>
+    <symbol id="logo-dots" viewBox="0 0 32 32"><g fill="currentColor"><circle cx="9.5" cy="9.5" r="6.2"/><circle cx="22.5" cy="9.5" r="6.2"/><circle cx="9.5" cy="22.5" r="6.2"/><circle cx="22.5" cy="22.5" r="6.2"/></g></symbol>
+  </svg>
+  <div class="onboarding" id="onboarding" role="dialog" aria-modal="true" aria-label="Bienvenue dans Murmur" hidden>
+    <div class="ob-art" data-art="0" aria-hidden="true">
+      <div class="ob-art-top"><span class="ob-logo"><svg class="logo logo-petals"><use href="#logo-petals"/></svg></span><span class="ob-word">murmur</span></div>
+      <div class="ob-art-bottom"><p>Petits cercles.<br>Grands moments.</p><small>Proches · Idées · Voix · Fichiers</small></div>
+    </div>
+    <div class="ob-body">
+      <div class="ob-top"><div class="ob-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div><button class="ob-link" type="button" data-skip>Passer</button></div>
+      <section data-step="0">
+        <p class="tagline">Des conversations plus proches</p>
+        <h1>Crée ton cercle</h1>
+        <p class="ob-lead">Des conversations privées en direct, avec les bonnes personnes. Tout est chiffré de bout en bout : seuls les membres lisent.</p>
+        <ul class="ob-points"><li><svg class="icon"><use href="#i-circles"/></svg><span><b>Des cercles</b> pour chaque groupe, avec salons écrits et vocaux.</span></li><li><svg class="icon"><use href="#i-waves"/></svg><span><b>La voix</b> en direct, légère, qui ne ralentit pas votre PC.</span></li><li><svg class="icon"><use href="#i-direct"/></svg><span><b>P2P</b> quand c’est possible, sans compromis sur la vie privée.</span></li></ul>
+        <div class="ob-actions"><button class="primary-button" id="ob-start" type="button">Commencer</button></div>
+      </section>
+      <section data-step="1" hidden>
+        <p class="tagline">Étape 1 sur 2</p>
+        <h1>À ton image</h1>
+        <label for="ob-name">Ton nom</label><input id="ob-name" maxlength="32" placeholder="Comment les autres te voient" autocomplete="off">
+        <label>Jour ou nuit</label>
+        <div class="ob-choices" role="radiogroup" aria-label="Thème"><button type="button" data-ob-theme="dark" role="radio">Nuit</button><button type="button" data-ob-theme="light" role="radio">Jour</button><button type="button" data-ob-theme="auto" role="radio">Auto</button></div>
+        <label>Couleur principale</label><div class="ob-swatches" id="ob-accent" role="radiogroup" aria-label="Couleur principale"></div>
+        <label>Couleur secondaire <small>messages, pastilles, voix</small></label><div class="ob-swatches" id="ob-accent2" role="radiogroup" aria-label="Couleur secondaire"></div>
+        <div class="ob-actions"><button class="secondary-button" type="button" data-back>Retour</button><button class="primary-button" id="ob-next" type="button">Continuer</button></div>
+      </section>
+      <section data-step="2" hidden>
+        <p class="tagline">Étape 2 sur 2</p>
+        <h1>Ton premier cercle</h1>
+        <div class="ob-tabs" role="tablist"><button type="button" role="tab" data-mode="create" aria-selected="true">Créer</button><button type="button" role="tab" data-mode="join" aria-selected="false">Rejoindre avec une invitation</button></div>
+        <div id="ob-create"><label for="ob-circle">Nom du cercle</label><input id="ob-circle" maxlength="64" placeholder="Maison, Rando, Studio…" autocomplete="off">
+          <details class="ob-advanced" id="ob-advanced" open><summary>Service qui héberge le cercle</summary><input id="ob-service" aria-label="Adresse du service" placeholder="https://murmur.exemple.workers.dev" autocomplete="off"><small>L’adresse de votre service Murmur (voir server/README.md), ou celle que votre ami vous a donnée. Il ne voit que du texte chiffré.</small></details></div>
+        <div id="ob-join" hidden><label for="ob-invite">Invitation</label><textarea id="ob-invite" rows="3" placeholder="murmur4|https://…" autocomplete="off"></textarea></div>
+        <div class="ob-actions"><button class="secondary-button" type="button" data-back>Retour</button><button class="primary-button" id="ob-finish" type="button">Créer mon cercle</button></div>
+      </section>
+      <p class="ob-error" id="ob-error" role="alert"></p>
+    </div>
+  </div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <header class="sidebar-brand"><span class="brand-mark" aria-hidden="true"><svg class="logo logo-petals"><use href="#logo-petals"/></svg><svg class="logo logo-ripple"><use href="#logo-ripple"/></svg><svg class="logo logo-rings"><use href="#logo-rings"/></svg><svg class="logo logo-dots"><use href="#logo-dots"/></svg></span><span><strong>murmur</strong><small>Des conversations plus proches</small></span></header>
+      <nav class="sidebar-scroll" aria-label="Navigation principale">
+        <div class="side-label">ESPACE</div>
+        <button class="side-link active" data-page="chat"><svg class="icon"><use href="#i-message"/></svg><span>Messages</span><span class="side-badge" id="message-count" hidden>0</span></button>
+        <button class="side-link" data-page="friends"><svg class="icon"><use href="#i-users"/></svg><span>Amis</span><span class="side-dot" id="friend-online-dot"></span></button>
+        <button class="side-link" data-page="voice"><svg class="icon"><use href="#i-phone"/></svg><span>Appels</span></button>
+        <button class="side-link" data-page="servers"><svg class="icon"><use href="#i-circles"/></svg><span>Cercles</span></button>
+        <div class="side-label contacts-label"><span>MES CERCLES</span><span>bêta</span></div>
+        <div class="side-friends" id="side-servers"><p>Aucun cercle.</p></div>
+        <button class="side-add" data-page="servers"><svg class="icon"><use href="#i-plus"/></svg> Créer ou rejoindre</button>
+        <div class="side-label contacts-label"><span>CONTACTS</span><span id="friend-count">0 / 16</span></div>
+        <div class="side-friends" id="side-friends"><p>Aucun ami enregistré.</p></div>
+        <button class="side-add" data-page="friends"><svg class="icon"><use href="#i-plus"/></svg> Ajouter un ami</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-call"><span class="call-indicator"></span><span><strong>Appel vocal</strong><small id="voice-small-status">Aucun appel en cours</small></span><button data-page="voice" aria-label="Voir les appels">›</button></div>
+        <div class="sidebar-tools">
+          <button class="side-link" data-page="network"><svg class="icon"><use href="#i-network"/></svg>Réseau</button>
+          <button class="side-link" data-page="settings"><svg class="icon"><use href="#i-settings"/></svg>Paramètres</button>
+        </div>
+        <div class="profile"><span class="profile-avatar">V</span><span><strong id="self-name">Vous</strong><small>Sur cet appareil</small></span></div>
+      </div>
+      <span id="dock-online" hidden></span>
+    </aside>
+    <main class="content">
+      <header class="topbar"><span id="top-icon" hidden></span><div><strong id="top-title">Messages</strong><small id="top-subtitle">Conversation privée</small></div><div class="top-actions"><span class="connection-pill" id="connection-pill">Hors ligne</span><button class="top-icon" data-page="settings" aria-label="Paramètres" title="Paramètres"><svg class="icon"><use href="#i-settings"/></svg></button><div class="window-controls" aria-label="Fenêtre"><button id="window-minimize" title="Réduire" aria-label="Réduire"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button><button id="window-maximize" title="Agrandir ou restaurer" aria-label="Agrandir ou restaurer"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg></button><button id="window-close" class="window-close" title="Fermer" aria-label="Fermer"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div></div></header>
+      <section class="page active" id="page-chat" aria-label="Conversation">
+        <div class="chat-heading empty-peer"><div class="friend-avatar large" id="peer-avatar">A</div><div><h1 id="chat-peer">Messages privés</h1><p id="chat-presence">Aucun ami connecté</p></div><button class="quiet-button" data-page="voice"><svg class="icon"><use href="#i-phone"/></svg> Appeler</button></div>
+        <div class="chat-scroll" id="chat-scroll"><div class="chat-empty" id="chat-empty"><div class="empty-icon"><svg class="icon"><use href="#i-message"/></svg></div><h2 id="empty-title">Aucune conversation</h2><p id="empty-description">Ajoutez un ami pour lui écrire ou l’appeler.</p><button class="primary-button" id="empty-action" data-page="friends">Ajouter un ami</button></div><div id="messages" class="messages" aria-live="polite"></div></div>
+        <div class="chat-composer"><form id="composer"><button type="button" id="attach-button" disabled aria-label="Envoyer une image ou un GIF" title="Envoyer une image ou un GIF"><svg class="icon"><use href="#i-plus"/></svg></button><textarea id="message-input" maxlength="2048" rows="1" placeholder="Écrire un message…" aria-label="Message"></textarea><button type="submit" id="send-button" disabled aria-label="Envoyer le message"><svg class="icon"><use href="#i-send"/></svg></button></form><small id="composer-status">Connectez un ami pour écrire.</small></div>
+      </section>
+      <section class="page scroll-page" id="page-friends" aria-label="Amis">
+        <div class="page-intro"><h1>Amis</h1><p>Retrouvez vos contacts et invitez une personne à vous rejoindre.</p></div>
+        <div class="friends-layout">
+          <div class="card friend-list-card"><div class="card-heading"><h2>Vos contacts</h2><span class="tag" id="friend-card-count">0 ami</span></div><div id="friends-list" class="friends-list"></div><p class="card-note" id="friends-notice">Ajoutez un ami pour le retrouver ici.</p></div>
+          <div class="card add-card"><div class="card-heading"><h2>Ajouter un ami</h2></div><p>Choisissez un nom et échangez un code d’invitation en privé.</p><label for="friend-name">Nom de l’ami</label><input id="friend-name" maxlength="63" placeholder="Nom affiché" autocomplete="off"><button class="primary-button full" id="create-friend">Créer une invitation</button><div class="split-caption"><span></span>ou<span></span></div><label for="friend-invite">Code reçu</label><textarea id="friend-invite" maxlength="511" rows="3" placeholder="Collez le code envoyé par votre ami"></textarea><button class="secondary-button full" id="add-friend">Ajouter avec ce code</button><div class="invite-result" id="invite-result" hidden><strong>Code d’invitation</strong><p>Transmettez-le uniquement à cette personne.</p><textarea id="generated-code" readonly rows="3" aria-label="Code d’invitation créé"></textarea><button class="tiny-button" id="copy-code">Copier le code</button></div></div>
+        </div>
+      </section>
+      <section class="page scroll-page" id="page-voice" aria-label="Appels">
+        <div class="page-intro"><h1>Appels</h1><p>Un salon vocal privé pour vous et votre ami.</p></div>
+        <div class="voice-stage"><div class="voice-title"><span class="voice-icon"><svg class="icon"><use href="#i-mic"/></svg></span><div><h2 id="voice-status">Aucun appel en cours</h2><p id="voice-detail">Connectez un ami pour lancer un appel.</p><p id="voice-speaking" role="status" aria-live="polite"></p></div></div><div class="voice-participants"><div class="participant" id="self-participant"><span class="friend-avatar" id="self-avatar">V</span><span><strong>Vous</strong><small id="self-voice">Prêt à rejoindre</small></span></div><div class="participant" id="peer-participant"><span class="friend-avatar alt" id="voice-peer-avatar">A</span><span><strong id="voice-peer">Votre ami</strong><small id="peer-voice">Hors ligne</small></span></div></div><div class="voice-controls"><button class="primary-button" id="call-button" disabled>Appeler</button><button class="secondary-button" id="mute-button" disabled>Couper le micro</button><button class="secondary-button" id="screen-button" disabled>Partager l’écran</button></div><div class="screen-stage" id="screen-stage" hidden><div class="screen-stage-heading"><strong>Partage d’écran</strong><span id="screen-quality">Connexion en cours…</span><button id="screen-fullscreen" type="button">Plein écran</button></div><video id="screen-video" autoplay playsinline muted></video><p id="screen-notice">Le flux vidéo apparaît ici.</p></div></div>
+      </section>
+      <section class="page scroll-page" id="page-servers" aria-label="Cercles">
+        <div class="page-intro"><h1>Cercles</h1><p class="tagline">Petits cercles. Grands moments.</p><p>Un cercle regroupe des salons de discussion partagés avec vos amis. Il est hébergé sur un service Murmur que vous choisissez.</p></div>
+        <h2 class="section-title">Mes cercles</h2>
+        <div class="circles-grid" id="circles-grid"></div>
+        <div class="card profile-card"><div class="card-heading"><h2>Votre nom</h2></div><p>C’est le nom que les autres membres voient, sur tous vos cercles. Vous pouvez le changer quand vous voulez.</p><div class="inline-form"><input id="profile-name" maxlength="32" placeholder="Votre nom" autocomplete="off" aria-label="Votre nom"><button class="secondary-button" id="profile-save">Enregistrer</button></div><small id="profile-saved" class="card-note" role="status"></small></div>
+        <div class="friends-layout">
+          <div class="card"><div class="card-heading"><h2>Créer un cercle</h2></div><p>Indiquez l’adresse de votre service Murmur (voir <code>server/README.md</code>) et le nom du cercle.</p><label for="srv-origin">Adresse du service</label><input id="srv-origin" placeholder="https://murmur.exemple.workers.dev" autocomplete="off"><label for="srv-name">Nom du cercle</label><input id="srv-name" maxlength="64" placeholder="Mes amis" autocomplete="off"><button class="primary-button full" id="srv-create">Créer le cercle</button></div>
+          <div class="card"><div class="card-heading"><h2>Rejoindre un cercle</h2></div><p>Collez l’invitation reçue d’un ami. Elle commence par <code>murmur4|</code>.</p><label for="srv-invite">Invitation</label><textarea id="srv-invite" rows="3" placeholder="murmur4|https://…" autocomplete="off"></textarea><button class="primary-button full" id="srv-join">Rejoindre</button></div>
+        </div>
+        <p class="card-note" id="servers-notice" role="status"></p>
+        <p class="card-note">Les messages sont chiffrés de bout en bout : le service qui héberge le cercle ne voit que du texte chiffré, mais il voit qui est membre et quand on écrit. Seul le propriétaire du cercle remet la clé aux nouveaux membres : si vous ne le connaissez pas, ne rejoignez pas.</p>
+      </section>
+      <section class="page" id="page-server" aria-label="Cercle">
+        <div class="server-empty" id="server-empty-state"><h2>Aucun cercle sélectionné</h2><p>Choisissez un cercle dans la colonne de gauche, ou créez-en un.</p><button class="primary-button" data-page="servers">Créer ou rejoindre</button></div>
+        <div class="server-layout" id="server-body" hidden>
+          <div class="server-channels">
+            <button class="server-header" id="server-menu" type="button" aria-haspopup="dialog" title="Paramètres du cercle"><span class="server-crest" id="server-crest">M</span><span class="server-header-text"><strong id="server-title">Cercle</strong><small id="server-status" class="server-status"></small><small id="server-owner-fp" class="server-status" title="Comparez cette empreinte avec celle que le propriétaire vous communique"></small><small id="server-members" class="server-status"></small></span><svg class="icon server-gear"><use href="#i-settings"/></svg></button>
+            <div class="channel-list" id="channel-list"></div>
+            <div class="voice-panel" id="voice-panel" hidden>
+              <div class="voice-head"><strong id="voice-title">Salon vocal</strong></div>
+              <div id="voice-people"></div>
+              <div class="voice-actions"><button class="tiny-button primary" id="voice-join" type="button">Rejoindre</button><button class="tiny-button" id="voice-mute" type="button" hidden>🎙 Micro</button><button class="tiny-button" id="voice-deafen" type="button" hidden>🎧 Son</button><button class="tiny-button remove" id="voice-leave" type="button" hidden>Quitter</button></div>
+              <small id="voice-stats" class="voice-stats"></small><small id="voice-notice" class="voice-stats" role="status"></small>
+            </div>
+            <div id="voice-audio" hidden></div>
+            <div class="member-title">Membres</div>
+            <div class="member-list side-members" id="side-members"></div>
+          </div>
+          <div class="server-chat">
+            <div class="chat-heading"><div><h1 id="server-channel-title">Salons</h1><p>🔒 Chiffrés de bout en bout : seuls les membres peuvent les lire</p></div>
+              <form class="search-box" id="search-form" role="search"><input id="search-input" type="search" placeholder="Rechercher dans ce salon" aria-label="Rechercher dans ce salon" maxlength="80" autocomplete="off"><button class="tiny-button" type="submit">Chercher</button><small id="search-note" class="search-note"></small></form></div>
+            <div class="search-results" id="search-results" hidden></div>
+            <div class="chat-scroll" id="server-scroll"><div class="chat-empty" id="server-empty"><h2>Aucun message</h2><p>Écrivez le premier message de ce salon.</p></div><div id="server-messages" class="messages"></div></div>
+            <div class="chat-composer">
+              <button class="tiny-button back-to-present" id="back-to-present" type="button" hidden>↓ Retour aux derniers messages</button>
+              <div class="compose-context" id="compose-context" hidden><span id="compose-text"></span><button type="button" id="compose-cancel" aria-label="Annuler">✕</button></div>
+              <div class="mention-list" id="mention-list" hidden></div>
+              <form id="server-composer"><button type="button" id="server-attach" disabled aria-label="Envoyer une image" title="Envoyer une image (JPEG, PNG, GIF, WebP, 1 Mo)"><svg class="icon"><use href="#i-plus"/></svg></button><input type="file" id="server-file" accept="image/jpeg,image/png,image/gif,image/webp" hidden><textarea id="server-input" maxlength="2000" rows="1" placeholder="Écrire dans ce salon… (@ pour mentionner)" aria-label="Message" disabled></textarea><button type="button" id="server-emoji" disabled aria-label="Émojis" title="Émojis">😊</button><button type="submit" id="server-send" disabled aria-label="Envoyer"><svg class="icon"><use href="#i-send"/></svg></button></form>
+              <small><span id="typing-note" role="status"></span> <span id="server-notice" role="status"></span></small></div>
+          </div>
+        </div>
+      </section>
+      <div class="modal" id="server-settings" hidden role="dialog" aria-modal="true" aria-labelledby="ss-title">
+        <div class="modal-card settings-modal">
+          <nav class="ss-nav" aria-label="Paramètres du cercle">
+            <div class="ss-name" id="ss-title">Cercle</div>
+            <button type="button" data-ss="overview" class="active">Aperçu</button>
+            <button type="button" data-ss="channels">Salons</button>
+            <button type="button" data-ss="members">Membres</button>
+            <button type="button" data-ss="invites" id="ss-invites-nav">Invitations</button>
+            <hr>
+            <button type="button" data-ss="advanced" class="danger">Avancé</button>
+          </nav>
+          <div class="ss-body">
+            <button class="ss-close" id="ss-close" type="button" aria-label="Fermer les paramètres">✕<small>Échap</small></button>
+            <section data-ss-panel="overview">
+              <h2>Aperçu</h2>
+              <div class="ss-hero"><span class="server-crest large" id="ss-crest">M</span><div><strong id="ss-hero-name">Cercle</strong><small id="ss-hero-status"></small></div></div>
+              <dl class="ss-facts"><dt>Membres</dt><dd id="ss-count">0</dd><dt>Votre rôle</dt><dd id="ss-role"></dd><dt>Propriétaire</dt><dd id="ss-owner" class="mono"></dd><dt>Service</dt><dd id="ss-origin" class="mono"></dd></dl>
+              <p class="ss-note">🔒 Les messages sont chiffrés de bout en bout. Le service qui héberge ce cercle ne voit que du texte chiffré, la liste des membres et l’heure des envois. Comparez l’empreinte du propriétaire avec celle qu’il vous a communiquée en dehors de Murmur.</p>
+            </section>
+            <section data-ss-panel="channels" hidden>
+              <h2>Salons</h2>
+              <div class="ss-list" id="ss-channels"></div>
+              <div class="server-tools" id="server-owner-tools" hidden>
+                <h3>Nouveau salon</h3>
+                <div class="inline-form"><input id="channel-name" maxlength="64" placeholder="nouveau-salon" aria-label="Nom du nouveau salon"><select id="channel-type" aria-label="Type de salon"><option value="text">Texte</option><option value="voice">Vocal</option></select><button class="primary-button" id="channel-create" type="button">Créer</button></div>
+              </div>
+            </section>
+            <section data-ss-panel="members" hidden>
+              <h2>Membres</h2>
+              <p class="ss-note" id="ss-members-note"></p>
+              <div class="member-list manage" id="member-list"></div>
+            </section>
+            <section data-ss-panel="invites" hidden>
+              <h2>Invitations</h2>
+              <p class="ss-note">Une invitation contient l’empreinte du propriétaire, qui protège contre un faux propriétaire. Envoyez-la en privé.</p>
+              <div class="ss-row"><label for="invite-ttl">Valable</label><select id="invite-ttl"><option value="3600">1 heure</option><option value="86400">1 jour</option><option value="604800" selected>7 jours</option></select><label for="invite-uses">Utilisations</label><select id="invite-uses"><option value="1">1</option><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option></select><button class="primary-button" id="invite-make" type="button">Créer une invitation</button></div>
+              <div class="invite-box" id="invite-box" hidden><label for="invite-code">Invitation à copier</label><textarea id="invite-code" rows="4" readonly></textarea><button class="tiny-button" id="invite-copy" type="button">Copier</button></div>
+            </section>
+            <section data-ss-panel="advanced" hidden>
+              <h2>Avancé</h2>
+              <div class="danger-zone"><div><strong>Retirer ce cercle de la liste</strong><p>Vous ne le verrez plus sur cet appareil. Le cercle et ses messages restent chez les autres membres ; vous pourrez le rejoindre avec une nouvelle invitation.</p></div><button class="tiny-button remove" id="server-remove" type="button">Retirer de la liste</button></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <section class="page scroll-page" id="page-network" aria-label="Connexion réseau">
+        <div class="page-intro"><h1>Réseau</h1><p>État de la connexion et options manuelles.</p></div>
+        <div class="network-grid"><div class="card"><div class="card-heading"><h2>État</h2></div><p id="network-status">Hors ligne.</p><p class="card-note" id="network-notice">La reconnexion est automatique avec un code ami récent.</p><div class="network-actions"><button class="secondary-button" id="disconnect-friend">Déconnecter</button><button class="secondary-button" id="reconnect-friend">Voir les amis</button></div></div>
+          <div class="card"><div class="card-heading"><h2>Connexion manuelle</h2><span class="tag">Avancé</span></div><p>Échangez une invitation et une réponse avec votre ami, en privé.</p><label for="network-received">Code reçu</label><textarea id="network-received" rows="4" placeholder="Invitation ou réponse reçue"></textarea><div class="network-actions"><button class="primary-button" id="net-invite">Créer une invitation</button><button class="secondary-button" id="net-reply">Répondre</button><button class="secondary-button" id="net-apply">Appliquer la réponse</button></div><label for="network-outgoing">Votre code à transmettre</label><textarea id="network-outgoing" rows="4" readonly placeholder="Le code apparaîtra ici"></textarea><button class="tiny-button" id="copy-network">Copier le code</button><details class="network-details"><summary>Paramètres STUN et TURN</summary><div class="network-fields"><label>Cercle STUN<input id="stun-host" value="stun.cloudflare.com" maxlength="255"></label><label>Port<input id="stun-port" value="3478" inputmode="numeric" maxlength="5"></label><label>Relais TURN<input id="turn-host" placeholder="Facultatif" maxlength="255"></label><label>Port<input id="turn-port" value="3478" inputmode="numeric" maxlength="5"></label><label>Identifiant<input id="turn-user" maxlength="127"></label><label>Mot de passe<input id="turn-password" type="password" maxlength="127"></label></div></details></div></div>
+      </section>
+      <section class="page scroll-page" id="page-settings" aria-label="Paramètres audio">
+        <div class="page-intro"><h1>Paramètres</h1><p>Choisissez vos périphériques et ajustez les volumes.</p></div>
+        <div class="settings-grid"><div class="card setting-card"><div class="card-heading"><h2>Microphone</h2></div><label for="audio-input">Périphérique d’entrée</label><select id="audio-input"></select><div class="range-line"><label for="input-volume">Volume</label><strong id="input-volume-value">100 %</strong></div><input id="input-volume" type="range" min="0" max="100"><div class="meter"><span id="mic-meter"></span></div><button class="secondary-button" id="test-mic">Tester le micro</button></div><div class="card setting-card"><div class="card-heading"><h2>Sortie audio</h2></div><label for="audio-output">Périphérique de sortie</label><select id="audio-output"></select><div class="range-line"><label for="output-volume">Volume</label><strong id="output-volume-value">100 %</strong></div><input id="output-volume" type="range" min="0" max="100"><div class="meter decorative"><span></span></div><button class="secondary-button" id="test-output">Écouter un son</button></div></div><p class="settings-note" id="audio-notice">Choisissez vos périphériques et volumes.</p><div class="settings-footer"><div><button class="secondary-button" id="test-button">Lancer le test solo</button><small>Ouvre deux clients locaux pour essayer les messages et l’appel.</small></div><span>Murmur 0.8</span></div>
+        <div class="card" id="voice-card"><div class="card-heading"><h2>Voix et seuils</h2></div>
+          <p>Chacun règle sa propre voix : ces choix restent sur cet appareil et s’appliquent à vos appels et aux salons vocaux.</p>
+          <div class="switch-list">
+            <label class="switch"><input type="checkbox" id="audio-echo"><span>Annulation d’écho <small>pour parler sans casque</small></span></label>
+            <label class="switch"><input type="checkbox" id="audio-noise"><span>Suppression du bruit <small>ventilateur, souffle, clavier</small></span></label>
+            <label class="switch"><input type="checkbox" id="audio-agc"><span>Réglage automatique du volume <small>égalise une voix trop faible ou trop forte</small></span></label>
+          </div>
+          <p class="card-note" id="cleanup-note" hidden>L’annulation d’écho, la suppression du bruit et le réglage automatique ne sont pas inclus dans cette version de l’appel direct : utilisez un casque. Ils sont actifs dans les salons vocaux des cercles.</p>
+          <div class="range-line"><label for="gate-slider">Seuil du micro</label><strong id="gate-value">Désactivé</strong></div>
+          <div class="gate-box"><div class="meter"><span id="gate-meter"></span><i id="gate-marker"></i></div><input id="gate-slider" type="range" min="0" max="60" step="1" value="0" aria-label="Seuil du micro"></div>
+          <p class="card-note">Sous ce seuil, rien n’est envoyé : le bruit de fond et les respirations disparaissent. Parlez dans « Tester le micro » et placez le seuil juste au-dessus du bruit de fond.</p>
+          <div class="range-line"><label for="speaking-slider">Sensibilité de « qui parle »</label><strong id="speaking-value">12</strong></div>
+          <input id="speaking-slider" type="range" min="3" max="50" step="1" value="12" aria-label="Sensibilité de détection de la voix">
+          <p class="card-note">À partir de quel niveau une personne est montrée comme parlant. Plus bas : plus sensible. C’est un réglage d’affichage : il ne change ni ce que vous envoyez ni ce que vous entendez.</p>
+        </div>
+        <div class="card" id="notify-card"><div class="card-heading"><h2>Notifications</h2></div><p>Quand la fenêtre n’est pas au premier plan, la barre des tâches clignote et le titre de la fenêtre compte les messages non lus. Rien du contenu des messages n’en sort.</p><label for="notify-mode">Prévenir pour</label><select id="notify-mode"><option value="mentions">Les mentions et les messages privés</option><option value="all">Tous les messages</option><option value="none">Rien</option></select></div>
+        <div class="card" id="sound-card"><div class="card-heading"><h2>Sons de l’interface</h2><button class="tiny-button" id="sound-test" type="button">Écouter</button></div><label class="switch"><input type="checkbox" id="sound-on"><span>Jouer des sons <small>message reçu, mention, appel, micro coupé</small></span></label><div class="range-line"><label for="sound-volume">Volume des sons</label><strong id="sound-volume-value">50 %</strong></div><input id="sound-volume" type="range" min="0" max="100" value="50"><p class="card-note">Les sons sont fabriqués par l’application, rien n’est téléchargé. Ce réglage reste sur cet appareil.</p></div>
+        <div class="card appearance-card" id="appearance-card"><div class="card-heading"><h2>Apparence</h2><span class="heading-tools"><button class="tiny-button" id="onboarding-replay" type="button">Revoir l’accueil</button><button class="tiny-button" id="appearance-reset">Rétablir</button></span></div>
+          <label>Thème</label><div class="theme-grid" id="theme-grid" role="radiogroup" aria-label="Thème"></div>
+          <label>Couleur d’accentuation</label><div class="accent-row" id="accent-row" role="radiogroup" aria-label="Couleur d’accentuation"></div>
+          <label>Couleur secondaire <small>messages, pastilles, voix</small></label><div class="accent-row" id="accent2-row" role="radiogroup" aria-label="Couleur secondaire"></div>
+          <label>Logo</label><div class="logo-row" id="logo-row" role="radiogroup" aria-label="Logo"></div>
+          <label>Taille du texte</label><div class="scale-row" id="scale-row" role="radiogroup" aria-label="Taille du texte"></div>
+          <details class="advanced"><summary>Thème personnalisé (avancé)</summary><p>Murmur est une page web : le fichier <code>user.css</code> de votre dossier de données peut redéfinir toutes les couleurs (variables <code>--bg-main</code>, <code>--accent</code>, <code>--text</code>…) ou n’importe quel style. Il s’applique par-dessus le thème choisi.</p><div class="network-actions"><button class="secondary-button" id="theme-open">Ouvrir le dossier</button><button class="secondary-button" id="theme-reload">Recharger user.css</button></div></details>
+        </div>
+        <div class="card" id="identity-card"><div class="card-heading"><h2>Mon identité</h2><span class="tag">Nouveau</span></div><p>Votre empreinte permet à un ami de vérifier, par exemple à la voix, que c’est bien votre compte. Elle ne change pas tant que vous gardez ce profil Windows.</p><label for="identity-fingerprint">Empreinte</label><input id="identity-fingerprint" readonly></div>
+        <div class="card update-card" id="update-card"><div class="card-heading"><h2>Mises à jour</h2></div><p id="update-status">Vérification des mises à jour…</p><div class="network-actions"><button class="secondary-button" id="update-check">Vérifier maintenant</button><button class="primary-button" id="update-download" disabled>Télécharger</button></div></div>
+      </section>
+    </main>
+  </div>
+  <div class="emoji-panel" id="emoji-panel" hidden></div>
+</body>
+</html>

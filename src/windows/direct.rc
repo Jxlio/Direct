@@ -1,11 +1,35 @@
 #include <windows.h>
 1 ICON "assets/direct.ico"
-#include "assets/lucide/icons.rc.inc"
 2 RCDATA "direct-notices.txt"
 3 RCDATA "CHANGELOG.md"
+4 RCDATA "ui/index.html"
+5 RCDATA "ui/style.css"
+6 RCDATA "ui/app.js"
+7 RCDATA "ui/server.js"
+8 RCDATA "ui/e2ee.js"
+9 RCDATA "ui/theme.js"
+10 RCDATA "ui/events.js"
+11 RCDATA "ui/voice.js"
+12 RCDATA "ui/sounds.js"
+13 RCDATA "ui/onboarding.js"
+20 RCDATA "ui/art/1.jpg"
+21 RCDATA "ui/art/2.jpg"
+22 RCDATA "ui/art/3.jpg"
+23 RCDATA "ui/art/4.jpg"
+24 RCDATA "ui/art/5.jpg"
+25 RCDATA "ui/art/6.jpg"
+26 RCDATA "ui/art/7.jpg"
+27 RCDATA "ui/art/8.jpg"
+28 RCDATA "ui/art/9.jpg"
+29 RCDATA "ui/art/10.jpg"
+30 RCDATA "ui/art/11.jpg"
+31 RCDATA "ui/art/12.jpg"
+32 RCDATA "ui/art/13.jpg"
+33 RCDATA "ui/art/14.jpg"
+34 RCDATA "ui/art/15.jpg"
 1 VERSIONINFO
-FILEVERSION 0,7,0,0
-PRODUCTVERSION 0,7,0,0
+FILEVERSION 0,8,0,0
+PRODUCTVERSION 0,8,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -13,12 +37,12 @@ BEGIN
   BEGIN
     BLOCK "040C04B0"
     BEGIN
-      VALUE "FileDescription", "Direct - Messages et appels\0"
-      VALUE "FileVersion", "0.7.0\0"
-      VALUE "InternalName", "Direct\0"
-      VALUE "OriginalFilename", "Direct.exe\0"
-      VALUE "ProductName", "Direct\0"
-      VALUE "ProductVersion", "0.7.0\0"
+      VALUE "FileDescription", "Murmur - Messages et appels\0"
+      VALUE "FileVersion", "0.8.0\0"
+      VALUE "InternalName", "Murmur\0"
+      VALUE "OriginalFilename", "Murmur.exe\0"
+      VALUE "ProductName", "Murmur\0"
+      VALUE "ProductVersion", "0.8.0\0"
     END
   END
   BLOCK "VarFileInfo"

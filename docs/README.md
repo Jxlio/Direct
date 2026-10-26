@@ -1,6 +1,6 @@
 # Documentation technique
 
-Pour installer et essayer Direct, consultez le [README du projet](../README.md).
+Pour installer et essayer Murmur, consultez le [README du projet](../README.md).
 Ce dossier décrit le fonctionnement du prototype et ses limites.
 
 | Sujet | Contenu |
@@ -11,6 +11,10 @@ Ce dossier décrit le fonctionnement du prototype et ses limites.
 | [Relais](relay.md) | Configuration et hébergement du relais |
 | [Test solo](local-test.md) | Deux clients locaux et limites du test sans périphériques |
 | [Audio](voice.md) | Transport vocal, codec et limites actuelles |
+| [Interface](interface.md) | HTML/CSS/JS dans WebView2 et coût mémoire |
+| [Performance](performance.md) | Protocole de mesure, objectifs et résultats de référence |
+| [Protocole](protocole.md) | Formats figés de la version 0.7 et protocole cible des serveurs |
+| [Architecture serveurs](architecture-serveurs.md) | Plan des serveurs, salons et appels de groupe |
 | [Mises à jour](updates.md) | Vérification, signature et publication des versions Windows |
 | [Crédits et licences](third-party.md) | Dépendances et notices à distribuer |
 

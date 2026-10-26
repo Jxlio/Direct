@@ -9,11 +9,13 @@ static struct {
     char incoming[MURMUR_ICE_TOKEN];
     ULONGLONG deadline;
 } pair;
+static int record_mode;
+void local_test_record_mode(int enabled) { record_mode=!!enabled; }
 static int spawn_pair_client(HWND owner,HANDLE input,HANDLE output,HANDLE error) {
     WCHAR executable[MAX_PATH],command[MAX_PATH+64]; STARTUPINFOEXW si={0}; PROCESS_INFORMATION pi={0};
     SIZE_T bytes=0; HANDLE handles[3]={input,output,error}; int result=-1;
     if (!GetModuleFileNameW(NULL,executable,MAX_PATH)) return -1;
-    swprintf_s(command,MAX_PATH+64,L"\"%ls\" --test-peer",executable);
+    swprintf_s(command,MAX_PATH+64,record_mode?L"\"%ls\" --test-peer-record":L"\"%ls\" --test-peer",executable);
     InitializeProcThreadAttributeList(NULL,1,0,&bytes);
     si.lpAttributeList=(LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(),0,bytes);
     if (!si.lpAttributeList) return -1;
@@ -33,8 +35,10 @@ int local_test_launch(HWND owner) {
     WCHAR executable[MAX_PATH],command[MAX_PATH+64]; STARTUPINFOW si={0}; PROCESS_INFORMATION pi={0};
     if (!GetModuleFileNameW(NULL,executable,MAX_PATH)) return -1;
     swprintf_s(command,MAX_PATH+64,L"\"%ls\" --test-pair",executable); si.cb=sizeof(si);
-    if (!CreateProcessW(executable,command,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&si,&pi)) return -1;
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess); ShowWindow(owner,SW_MINIMIZE); return 0;
+    if (!CreateProcessW(executable,command,NULL,NULL,FALSE,0,NULL,NULL,&si,&pi)) return -1;
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    (void)owner;
+    return 0;
 }
 int local_test_start(HWND owner,int responder) {
     murmur_ice_config settings={0}; HANDLE child_input=NULL,child_output=NULL,error=NULL;

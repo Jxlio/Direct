@@ -2,20 +2,20 @@
 
 ## Ajouter un ami une fois
 
-Avec Direct 0.7, **Amis → Créer un code ami** produit une invitation privée.
+Avec Murmur 0.7, **Amis → Créer un code ami** produit une invitation privée.
 Le créateur choisit un nom local pour le correspondant et transmet le code.
 L’autre personne choisit un nom et utilise **Ajouter avec ce code**.
 Les noms ne sont pas des identités certifiées.
 
 Un code `direct2|…` contient le secret de la relation et la configuration du
-service privé de mise en relation. Une fois enregistré, Direct ouvre une seule
+service privé de mise en relation. Une fois enregistré, Murmur ouvre une seule
 connexion WebSocket HTTPS pour les contacts du groupe et négocie automatiquement
 une session ICE/DTLS quand un ami est disponible. Il n’y a pas de serveur à lancer
 sur les PC ni de code d’offre/réponse à échanger à chaque session.
 
 Le service doit avoir été configuré une fois par l’organisateur du groupe.
 Les autres amis n’ont pas besoin de compte Cloudflare. Une installation sans
-service configuré peut importer un code Direct récent pour recevoir cette
+service configuré peut importer un code Murmur récent pour recevoir cette
 configuration. Un seul groupe de mise en relation est pris en charge par profil.
 Un code provenant d’un autre groupe ne remplace pas la configuration existante.
 
@@ -28,7 +28,7 @@ Un code provenant d’un autre groupe ne remplace pas la configuration existante
   tentative P2P est espacée d’au moins une minute.
 - **Annuler la connexion** suspend la reconnexion P2P jusqu’à son rétablissement
   depuis **Reconnexion automatique** ou au prochain lancement.
-- Garder une seule instance normale de Direct ouverte par profil. Les fenêtres
+- Garder une seule instance normale de Murmur ouverte par profil. Les fenêtres
   du test solo sont isolées et n’utilisent pas le service.
 - Le vocal demande toujours une action locale et la réponse de l’autre personne.
 - Le nom et les messages affichés correspondent à la session courante. En changeant

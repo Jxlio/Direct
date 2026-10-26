@@ -9,6 +9,8 @@ int main(void) {
     char code[DIRECT_INVITE_MAX],token[6000]; size_t size=sizeof(packet); unsigned role;
     CHECK(direct_service_valid(&profile)); CHECK(!direct_invite_create(secret,&profile,code));
     CHECK(!direct_invite_parse(code,result,&parsed) && !memcmp(secret,result,32) && !memcmp(&profile,&parsed,sizeof(profile)));
+    { char renamed[DIRECT_INVITE_MAX]; memcpy(renamed,code,sizeof(renamed)); memcpy(renamed,"murmur2|",8);
+      CHECK(!direct_invite_parse(renamed,result,&parsed) && !memcmp(secret,result,32) && !memcmp(&profile,&parsed,sizeof(profile))); }
     CHECK(!direct_friend_route(secret,route)); CHECK(!direct_friend_route(challenge,other)); CHECK(memcmp(route,other,32)); CHECK(memcmp(route,secret,32));
     CHECK(!direct_signal_seal(secret,0,challenge,"private description",packet,&size));
     CHECK(!direct_signal_open(secret,packet,size,&role,decoded,token) && role==0 && !memcmp(decoded,challenge,32) && !strcmp(token,"private description"));

@@ -5,6 +5,7 @@
 #include "murmur/ice.h"
 #include "murmur/voice.h"
 #define WM_MURMUR_LINK (WM_APP + 10)
+#define WM_MURMUR_LEVELS (WM_APP + 36)
 typedef struct {
     unsigned room;
     size_t size;
@@ -30,6 +31,8 @@ int link_voice_requested(void);
 unsigned link_voice_remote(void);
 void link_audio_configure(const murmur_audio_config *config);
 unsigned link_voice_received_packets(void);
+/* Who is speaking: loudness 0..100 of our microphone and of the other side. */
+void link_voice_levels(unsigned *self, unsigned *peer);
 uint64_t link_voice_decoded_frames(void);
 int link_ice_start(int offerer, const murmur_ice_config *settings, const char *offer);
 int link_ice_answer(const char *answer);
